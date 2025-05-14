@@ -1013,24 +1013,13 @@ SOFTWARE.
 
 ---
 
-## Acknowledgments
-
-Built with ❤️ by Rahul and Lyra.
-
-Special thanks to:
-- Claude Desktop team for the MCP protocol
-- Apple Silicon team for the incredible M3 Max
-- The open source community
-
----
 
 ## Contact
 
-- **Email**: rahul@flux-mcp.dev
-- **Discord**: [FLUX Community](https://discord.gg/flux-mcp)
-- **Twitter**: [@flux_mcp](https://twitter.com/flux_mcp)
-- **Website**: [flux-mcp.dev](https://flux-mcp.dev)
-
+- **Email**: rahul.sawhney@fau.de, sawhney.rahulofficial@outlook.com
+- **Degree**: Master's in Data Science
+- **University**: Friedrich-Alexander-Universität Erlangen-Nürnberg
+- 
 ---
 
 <p align="center">
