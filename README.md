@@ -1,4 +1,4 @@
-# FLUX - High-Performance Text Manipulation Engine for Apple Silicon
+# FLUX : High-Performance Text Manipulation Engine for Apple Silicon
 
 <p align="center">
   <img src="https://img.shields.io/badge/Platform-Apple%20Silicon-black?style=for-the-badge&logo=apple" />
