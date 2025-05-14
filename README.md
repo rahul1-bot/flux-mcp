@@ -1,4 +1,4 @@
-# FLUX - Advanced Text Editor MCP for Apple Silicon
+# FLUX - High-Performance Text Manipulation Engine for Apple Silicon
 
 <p align="center">
   <img src="https://img.shields.io/badge/Platform-Apple%20Silicon-black?style=for-the-badge&logo=apple" />
@@ -8,7 +8,7 @@
 </p>
 
 <p align="center">
-  <strong>The Most Advanced Text Manipulation MCP Ever Built</strong><br>
+  <strong>The Most Powerful Text Processing Engine Ever Built for MCP</strong><br>
   <em>Designed for Apple Silicon | Solving Real Problems | Built with Love</em>
 </p>
 
