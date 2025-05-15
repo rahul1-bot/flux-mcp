@@ -82,19 +82,42 @@ class FluxServer:
                     }
                 ),
                 types.Tool(
-                    name="flux_replace",
-                    description="Replace text with automatic optimization",
+                    name="text_replace",
+                    description="Advanced text replacement with hierarchical selection in Python files.\n\n" +
+                    "⚠️ **CRITICAL USAGE GUIDE FOR AI/LLMs** ⚠️\n\n" +
+                    "## How This Tool Works\n" +
+                    "This tool precisely replaces code blocks by targeting classes/methods in Python files while preserving indentation.\n\n" +
+                    "## CORRECT Usage Patterns\n" +
+                    "1. **highlight parameter** - MUST follow format: 'ClassName' or 'ClassName.method_name'\n" +
+                    "   * ✅ highlight='MyClass'  - replaces entire class\n" +
+                    "   * ✅ highlight='MyClass.my_method'  - replaces specific method\n" +
+                    "   * ❌ highlight='class MyClass'  - WRONG: no 'class' keyword\n" +
+                    "   * ❌ highlight='def my_method()'  - WRONG: no 'def' keyword or parentheses\n\n" +
+                    "2. **replace_with parameter** - MUST include complete definition line and proper indentation\n" +
+                    "   * ✅ Use triple quotes: replace_with=\"\"\"def method(self):\\n    return True\"\"\"\n" +
+                    "   * ✅ Include method/class definition line when replacing\n" +
+                    "   * ✅ Use consistent indentation (same pattern throughout code)\n" +
+                    "   * ❌ Missing definition: replace_with=\"\"\"    return True\"\"\"  - WRONG\n" +
+                    "   * ❌ Inconsistent indentation - WRONG\n\n" +
+                    "## Common Mistakes (AVOID THESE)\n" +
+                    "* Targeting non-existent classes/methods (check available targets in error messages)\n" +
+                    "* Mixed indentation (spaces vs tabs) in replacement code\n" +
+                    "* Missing triple quotes (must use \"\"\" for proper whitespace preservation)\n" +
+                    "* Incorrect escaping in replacement string (watch for \\n, \\t characters)\n" +
+                    "* Not including complete definition line in replacement\n" +
+                    "* Targeting a method but providing class-level replacement code\n\n" +
+                    "## Iterative Usage Recommended\n" +
+                    "If replacement fails, READ THE ERROR MESSAGE carefully - it contains lists of available targets and suggestions.",
                     inputSchema={
                         "type": "object",
                         "properties": {
-                            "path": {"type": "string", "description": "File path"},
-                            "old_text": {"type": "string", "description": "Text to find"},
-                            "new_text": {"type": "string", "description": "Replacement text"},
-                            "is_regex": {"type": "boolean", "description": "Whether old_text is regex"},
-                            "all_occurrences": {"type": "boolean", "description": "Replace all occurrences"},
-                            "simple_mode": {"type": "boolean", "description": "Use fast path for simple replacements (auto-detected if not set)"}
+                            "path": {"type": "string", "description": "Absolute file path to modify (must exist)"},
+                            "highlight": {"description": "Target specification: 'ClassName' or 'ClassName.method_name' format ONLY. DO NOT include 'class' or 'def' keywords, parentheses, or colons."},
+                            "replace_with": {"type": "string", "description": "Replacement text - MUST use triple quotes (\"\"\"...\"\"\"), include definition line, and use consistent indentation"},
+                            "checkpoint": {"type": "string", "description": "Optional name for the checkpoint"},
+                            "auto_checkpoint": {"type": "boolean", "description": "Whether to auto-generate a checkpoint name"}
                         },
-                        "required": ["path", "old_text", "new_text"]
+                        "required": ["path", "highlight", "replace_with"]
                     }
                 )
             ]
@@ -115,8 +138,8 @@ class FluxServer:
                     json_result: str = json.dumps(results, indent=2)
                     return [types.TextContent(type="text", text=json_result)]
                 
-                elif name == "flux_replace":
-                    result: str = await self.engine.replace(**arguments)
+                elif name == "text_replace":
+                    result: str = await self.engine.text_replace(**arguments)
                     return [types.TextContent(type="text", text=result)]
                 
                 else:

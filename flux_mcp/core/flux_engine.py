@@ -120,48 +120,102 @@ class FluxEngine:
             file_path, pattern, is_regex, case_sensitive, whole_word
         )
 
-    async def replace(self, path: str, old_text: str, new_text: str, 
-                     is_regex: bool = False, all_occurrences: bool = True,
-                     simple_mode: bool = False) -> str:
-        file_path: Path = Path(path)
+
+
+    async def text_replace(self, path: str, highlight: str | dict[str, Any], 
+                         replace_with: str, checkpoint: str | None = None,
+                         auto_checkpoint: bool = False) -> str:
+        """Advanced text replacement with hierarchical selection.
         
-        if not file_path.exists():
-            raise FileNotFoundError(f"File not found: {path}")
+        Args:
+            path: File path to modify
+            highlight: Target specification in format "ClassName" or "ClassName.method_name"
+                   DO NOT include 'class' or 'def' keywords, parentheses, or colons
+            replace_with: Replacement text (triple quotes recommended)
+            checkpoint: Optional name for the checkpoint
+            auto_checkpoint: Whether to auto-generate a checkpoint name
         
-        # Auto-detect simple mode
-        file_size: int = file_path.stat().st_size
-        is_simple: bool = (
-            simple_mode or 
-            (file_size < 1000000 and not is_regex and len(old_text) < 1000)
-        )
-        
-        if is_simple:
-            # Fast path for simple replacements
-            content: str = file_path.read_text()
-            
-            if all_occurrences:
-                new_content: str = content.replace(old_text, new_text)
-                count: int = content.count(old_text)
-            else:
-                new_content = content.replace(old_text, new_text, 1)
-                count = 1 if old_text in content else 0
-            
-            # Direct write for simple mode
-            file_path.write_text(new_content)
-            return f"Replaced {count} occurrences in {path}"
-        
-        # Full transaction mode for complex replacements
-        transaction_id: str = await self.transaction_manager.begin()
-        
+        Returns:
+            Success message
+        """
         try:
-            count: int = await self.text_editor.replace(
-                file_path, old_text, new_text, is_regex, all_occurrences
-            )
-            await self.transaction_manager.commit(transaction_id)
-            return f"Replaced {count} occurrences in {path}"
-        except Exception as e:
-            await self.transaction_manager.rollback(transaction_id)
-            raise Exception(f"Failed to replace text: {e}")
+            file_path: Path = Path(path)
+            
+            if not file_path.exists():
+                raise FileNotFoundError(f"File not found: {path}")
+            
+            try:
+                result: str = await self.text_editor.text_replace(
+                    file_path, highlight, replace_with, checkpoint, auto_checkpoint
+                )
+                return result
+            except ValueError as e:
+                # Provide more user-friendly error information
+                if "could not find" in str(e).lower():
+                    try:
+                        # Safely scan the file to count major elements
+                        with open(file_path, 'r', encoding='utf-8') as f:
+                            content = f.read()
+                        
+                        import re
+                        class_count = len(re.findall(r'^\s*class\s+(\w+)', content, re.MULTILINE))
+                        func_count = len(re.findall(r'^\s*def\s+(\w+)', content, re.MULTILINE))
+                        
+                        help_message = (
+                            f"ERROR: Target not found in {path}\n\n"
+                            f"CORRECT FORMAT: Use 'ClassName' or 'ClassName.method_name' format.\n"
+                            f"DO NOT include 'class' or 'def' keywords, parentheses, or colons.\n\n"
+                            f"EXAMPLES:\n"
+                            f"  highlight='MyClass'        ✓ CORRECT\n"
+                            f"  highlight='MyClass.method' ✓ CORRECT\n"
+                            f"  highlight='class MyClass'  ✗ INCORRECT (don't include 'class')\n"
+                            f"  highlight='def method()'   ✗ INCORRECT (don't include 'def' or parentheses)\n\n"
+                            f"This file contains approximately {class_count} classes and {func_count} functions.\n\n"
+                            f"ERROR DETAILS: {e}"
+                        )
+                    except Exception as scan_error:
+                        # Fallback if we can't scan the file
+                        help_message = (
+                            f"ERROR: Target not found in {path}\n\n"
+                            f"CORRECT FORMAT: Use 'ClassName' or 'ClassName.method_name' format.\n"
+                            f"DO NOT include 'class' or 'def' keywords, parentheses, or colons.\n\n"
+                            f"EXAMPLES:\n"
+                            f"  highlight='MyClass'        ✓ CORRECT\n"
+                            f"  highlight='MyClass.method' ✓ CORRECT\n"
+                            f"  highlight='class MyClass'  ✗ INCORRECT (don't include 'class')\n"
+                            f"  highlight='def method()'   ✗ INCORRECT (don't include 'def' or parentheses)\n\n"
+                            f"ERROR DETAILS: {e}"
+                        )
+                        
+                    raise Exception(help_message)
+                else:
+                    raise Exception(f"Failed to replace text: {e}")
+            except Exception as e:
+                # Create detailed error report
+                error_details = str(e)
+                if hasattr(e, '__traceback__'):
+                    import traceback
+                    error_details = f"{error_details}\n\nDetails: {traceback.format_exc()}"
+                
+                raise Exception(f"Failed to replace text: {error_details}")
+                
+        except Exception as outer_e:
+            # Ultimate fallback to prevent server crashes
+            try:
+                error_message = str(outer_e)
+                # Log the error but return a graceful message
+                if hasattr(outer_e, '__traceback__'):
+                    import logging
+                    import traceback
+                    logging.error(f"text_replace error: {traceback.format_exc()}")
+                else:
+                    import logging
+                    logging.error(f"text_replace error: {error_message}")
+                    
+                return f"ERROR: {error_message}"
+            except:
+                # Even if logging fails, return something rather than crash
+                return "ERROR: Failed to replace text. See server logs for details."
 
     def __del__(self) -> None:
         self.executor.shutdown(wait=True)

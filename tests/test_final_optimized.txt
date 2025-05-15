@@ -1,0 +1,3 @@
+FLUX OPTIMIZED!
+This is blazing fast for small files
+And still powerful for large files
