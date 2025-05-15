@@ -124,20 +124,9 @@ class FluxEngine:
 
     async def text_replace(self, path: str, highlight: str | dict[str, Any], 
                          replace_with: str, checkpoint: str | None = None,
-                         auto_checkpoint: bool = False) -> str:
-        """Advanced text replacement with hierarchical selection.
-        
-        Args:
-            path: File path to modify
-            highlight: Target specification in format "ClassName" or "ClassName.method_name"
-                   DO NOT include 'class' or 'def' keywords, parentheses, or colons
-            replace_with: Replacement text (triple quotes recommended)
-            checkpoint: Optional name for the checkpoint
-            auto_checkpoint: Whether to auto-generate a checkpoint name
-        
-        Returns:
-            Success message
-        """
+                         auto_checkpoint: bool = False, dry_run: bool = False,
+                         batch_mode: bool = False) -> str:
+        """Advanced text replacement with hierarchical selection."""
         try:
             file_path: Path = Path(path)
             
@@ -145,23 +134,42 @@ class FluxEngine:
                 raise FileNotFoundError(f"File not found: {path}")
             
             try:
-                result: str = await self.text_editor.text_replace(
-                    file_path, highlight, replace_with, checkpoint, auto_checkpoint
+                results: dict[str, Any] = await self.text_editor.text_replace(
+                    file_path, highlight, replace_with, checkpoint, auto_checkpoint, 
+                    dry_run=dry_run, batch_mode=batch_mode
                 )
-                return result
+                
+                if dry_run:
+                    return results["diff_output"]
+                    
+                return results["message"]
+                
             except ValueError as e:
-                # Provide more user-friendly error information
-                if "could not find" in str(e).lower():
+                error_str: str = str(e).lower()
+                
+                if "could not find" in error_str:
                     try:
-                        # Safely scan the file to count major elements
                         with open(file_path, 'r', encoding='utf-8') as f:
-                            content = f.read()
+                            content: str = f.read()
                         
                         import re
-                        class_count = len(re.findall(r'^\s*class\s+(\w+)', content, re.MULTILINE))
-                        func_count = len(re.findall(r'^\s*def\s+(\w+)', content, re.MULTILINE))
+                        class_count: int = len(re.findall(r'^\s*class\s+(\w+)', content, re.MULTILINE))
+                        func_count: int = len(re.findall(r'^\s*def\s+(\w+)', content, re.MULTILINE))
                         
-                        help_message = (
+                        similar_targets: list[tuple[str, float]] = self.text_editor.find_similar_targets(
+                            file_path, highlight if isinstance(highlight, str) else highlight.get("target", "")
+                        )
+                        
+                        suggestions: str = ""
+                        if similar_targets:
+                            suggestions = "\n🔍 Similar targets found:"
+                            for target, score in similar_targets:
+                                suggestions += f"\n  → '{target}' (similarity: {score:.0%})"
+                            
+                            if score := similar_targets[0][1] >= 0.85:
+                                suggestions += f"\n\n🔄 Try with: highlight='{similar_targets[0][0]}'"
+                        
+                        help_message: str = (
                             f"ERROR: Target not found in {path}\n\n"
                             f"CORRECT FORMAT: Use 'ClassName' or 'ClassName.method_name' format.\n"
                             f"DO NOT include 'class' or 'def' keywords, parentheses, or colons.\n\n"
@@ -171,11 +179,26 @@ class FluxEngine:
                             f"  highlight='class MyClass'  ✗ INCORRECT (don't include 'class')\n"
                             f"  highlight='def method()'   ✗ INCORRECT (don't include 'def' or parentheses)\n\n"
                             f"This file contains approximately {class_count} classes and {func_count} functions.\n\n"
+                            f"{suggestions}\n\n"
                             f"ERROR DETAILS: {e}"
                         )
+                        
+                        if isinstance(highlight, str) and "." not in highlight:
+                            recovery_result: dict[str, Any] | None = await self.text_editor.try_fuzzy_recovery(
+                                file_path, highlight, replace_with, auto_checkpoint, 
+                                threshold=0.85, dry_run=dry_run
+                            )
+                            
+                            if recovery_result:
+                                recovery_msg: str = (
+                                    f"🛠️ RECOVERY SUGGESTION: Found similar target '{recovery_result['target']}'.\n\n"
+                                    f"Would you like to use this target instead?\n"
+                                    f"Try with: highlight='{recovery_result['target']}'"
+                                )
+                                return recovery_msg
+                                
                     except Exception as scan_error:
-                        # Fallback if we can't scan the file
-                        help_message = (
+                        help_message: str = (
                             f"ERROR: Target not found in {path}\n\n"
                             f"CORRECT FORMAT: Use 'ClassName' or 'ClassName.method_name' format.\n"
                             f"DO NOT include 'class' or 'def' keywords, parentheses, or colons.\n\n"
@@ -188,11 +211,22 @@ class FluxEngine:
                         )
                         
                     raise Exception(help_message)
+                    
+                elif "invalid python" in error_str or "syntax error" in error_str:
+                    import re
+                    error_line_match: re.Match | None = re.search(r'line (\d+)', error_str)
+                    line_info: str = f"around line {error_line_match.group(1)}" if error_line_match else ""
+                    
+                    help_message: str = (
+                        f"SYNTAX ERROR: The replacement code contains Python syntax errors {line_info}.\n\n"
+                        f"ERROR DETAILS: {e}\n\n"
+                        f"Try using triple quotes for multi-line code: replace_with=\"\"\"def method():\\n    ..."
+                    )
+                    raise Exception(help_message)
                 else:
                     raise Exception(f"Failed to replace text: {e}")
             except Exception as e:
-                # Create detailed error report
-                error_details = str(e)
+                error_details: str = str(e)
                 if hasattr(e, '__traceback__'):
                     import traceback
                     error_details = f"{error_details}\n\nDetails: {traceback.format_exc()}"
@@ -200,10 +234,8 @@ class FluxEngine:
                 raise Exception(f"Failed to replace text: {error_details}")
                 
         except Exception as outer_e:
-            # Ultimate fallback to prevent server crashes
             try:
-                error_message = str(outer_e)
-                # Log the error but return a graceful message
+                error_message: str = str(outer_e)
                 if hasattr(outer_e, '__traceback__'):
                     import logging
                     import traceback
@@ -214,7 +246,6 @@ class FluxEngine:
                     
                 return f"ERROR: {error_message}"
             except:
-                # Even if logging fails, return something rather than crash
                 return "ERROR: Failed to replace text. See server logs for details."
 
     def __del__(self) -> None:

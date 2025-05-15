@@ -93,6 +93,11 @@ class FluxServer:
                     "   * ✅ highlight='MyClass.my_method'  - replaces specific method\n" +
                     "   * ❌ highlight='class MyClass'  - WRONG: no 'class' keyword\n" +
                     "   * ❌ highlight='def my_method()'  - WRONG: no 'def' keyword or parentheses\n\n" +
+                    "   * Advanced targeting is also supported:\n" +
+                    "   * ✅ highlight={\"pattern\": r\"regex_pattern\"} - for regex-based targeting\n" +
+                    "   * ✅ highlight={\"line_range\": [1, 10]} - for line number targeting\n" +
+                    "   * ✅ highlight={\"targets\": [\"Class1\", \"Class2.method\"]} - for multi-target replacements\n" +
+                    "   * ✅ highlight={\"target\": \"MyClass\", \"occurrence\": 2} - for nth occurrence\n\n" +
                     "2. **replace_with parameter** - MUST include complete definition line and proper indentation\n" +
                     "   * ✅ Use triple quotes: replace_with=\"\"\"def method(self):\\n    return True\"\"\"\n" +
                     "   * ✅ Include method/class definition line when replacing\n" +
@@ -106,16 +111,24 @@ class FluxServer:
                     "* Incorrect escaping in replacement string (watch for \\n, \\t characters)\n" +
                     "* Not including complete definition line in replacement\n" +
                     "* Targeting a method but providing class-level replacement code\n\n" +
-                    "## Iterative Usage Recommended\n" +
-                    "If replacement fails, READ THE ERROR MESSAGE carefully - it contains lists of available targets and suggestions.",
+                    "## Error Recovery\n" +
+                    "If replacement fails, the tool will attempt to recover by:\n" +
+                    "* Using fuzzy matching for targets\n" +
+                    "* Suggesting similar targets when exact matches fail\n" +
+                    "* Providing detailed error messages and contextual information\n\n" +
+                    "## Diff Preview Mode\n" +
+                    "Use dry_run=True to preview changes without applying them.",
                     inputSchema={
                         "type": "object",
                         "properties": {
                             "path": {"type": "string", "description": "Absolute file path to modify (must exist)"},
-                            "highlight": {"description": "Target specification: 'ClassName' or 'ClassName.method_name' format ONLY. DO NOT include 'class' or 'def' keywords, parentheses, or colons."},
+                            "highlight": {"description": "Target specification: 'ClassName' or 'ClassName.method_name' format ONLY. DO NOT include 'class' or 'def' keywords, parentheses, or colons. Can also be a dict with advanced targeting options like pattern, line_range, targets, occurrence."},
                             "replace_with": {"type": "string", "description": "Replacement text - MUST use triple quotes (\"\"\"...\"\"\"), include definition line, and use consistent indentation"},
                             "checkpoint": {"type": "string", "description": "Optional name for the checkpoint"},
-                            "auto_checkpoint": {"type": "boolean", "description": "Whether to auto-generate a checkpoint name"}
+                            "auto_checkpoint": {"type": "boolean", "description": "Whether to auto-generate a checkpoint name"}, 
+                            "dry_run": {"type": "boolean", "description": "If True, preview changes without applying them"},
+                            "batch_mode": {"type": "boolean", "description": "If True, process multiple related replacements together"},
+                            "process_imports": {"type": "boolean", "description": "If True, analyze and manage imports for Python files"}
                         },
                         "required": ["path", "highlight", "replace_with"]
                     }
@@ -160,7 +173,7 @@ class FluxServer:
                 write_stream,
                 InitializationOptions(
                     server_name="flux-text-editor",
-                    server_version="0.2.0",  # Bumped version for optimized engine
+                    server_version="0.3.0",  # Updated for enhanced text replacement
                     capabilities=self.server.get_capabilities(
                         notification_options=NotificationOptions(),
                         experimental_capabilities={},

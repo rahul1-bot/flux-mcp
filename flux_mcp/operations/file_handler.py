@@ -73,7 +73,15 @@ class FileHandler:
         return b''.join(lines)
 
     async def write_file(self, file_path: Path, content: str, 
-                        encoding: str = 'utf-8') -> None:
+                        encoding: str = 'utf-8', backup: bool = True) -> None:
+        """Write content to a file with automatic backup and error recovery.
+        
+        Args:
+            file_path: Path to the file
+            content: Content to write
+            encoding: Text encoding to use
+            backup: Whether to create a backup before writing
+        """
         # Check if we're already in a transaction
         transaction_id: str | None = None
         commit_needed: bool = False
@@ -87,8 +95,17 @@ class FileHandler:
             commit_needed = True
         
         try:
+            # Create parent directories if needed
+            file_path.parent.mkdir(parents=True, exist_ok=True)
+            
             # Acquire file lock through transaction manager
             await self.transaction_manager.acquire_file_lock(transaction_id, file_path)
+            
+            # Create backup if requested and file exists
+            if backup and file_path.exists():
+                import shutil
+                backup_path: Path = file_path.with_suffix(file_path.suffix + '.bak')
+                shutil.copy2(file_path, backup_path)
             
             # Write to temp file
             content_bytes: bytes = content.encode(encoding)
@@ -106,6 +123,16 @@ class FileHandler:
         except Exception as e:
             if commit_needed:
                 await self.transaction_manager.rollback(transaction_id)
+            
+            # Attempt recovery if possible
+            try:
+                backup_path: Path = file_path.with_suffix(file_path.suffix + '.bak')
+                if backup_path.exists():
+                    import shutil
+                    shutil.copy2(backup_path, file_path)
+            except Exception:
+                pass
+                
             raise e
 
     async def _clear_file_cache(self, file_path: Path) -> None:
