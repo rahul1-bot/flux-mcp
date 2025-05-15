@@ -3,11 +3,12 @@ from __future__ import annotations
 import re
 import asyncio
 from pathlib import Path
-from typing import Any
+from typing import Any, Optional, Union
 from dataclasses import dataclass
 
 from flux_mcp.core.transaction_manager import TransactionManager
 from flux_mcp.core.memory_manager import MemoryManager
+from flux_mcp.parsers import get_parser_for_file
 
 
 @dataclass
@@ -31,6 +32,73 @@ class TextEditor:
                  memory_manager: MemoryManager) -> None:
         self.transaction_manager: TransactionManager = transaction_manager
         self.memory_manager: MemoryManager = memory_manager
+        
+    def _validate_python_syntax(self, code: str) -> tuple[bool, str]:
+        """Validate Python code syntax using AST parsing.
+        
+        Args:
+            code: Python code to validate
+            
+        Returns:
+            Tuple of (is_valid, error_message)
+        """
+        try:
+            import ast
+            ast.parse(code)
+            return True, ""
+        except SyntaxError as e:
+            line_content: str = code.splitlines()[e.lineno-1] if e.lineno <= len(code.splitlines()) else ""
+            pointer: str = " " * max(0, e.offset-1) + "^" if e.offset else ""
+            return False, f"Line {e.lineno}, Col {e.offset}: {e.msg}\n{line_content}\n{pointer}"
+            
+    def _check_method_signature(self, original: str, replacement: str) -> list[str]:
+        """Check method signature compatibility.
+        
+        Args:
+            original: Original method code
+            replacement: Replacement method code
+            
+        Returns:
+            List of warning messages for compatibility issues
+        """
+        warnings: list[str] = []
+        
+        # Extract method signatures using regex
+        import re
+        orig_sig = re.search(r'def\s+(\w+)\s*\((.*?)\)', original)
+        new_sig = re.search(r'def\s+(\w+)\s*\((.*?)\)', replacement)
+        
+        if orig_sig and new_sig:
+            orig_name: str = orig_sig.group(1)
+            new_name: str = new_sig.group(1)
+            
+            # Extract parameter lists
+            orig_params: list[str] = [
+                p.split(':')[0].split('=')[0].strip() 
+                for p in orig_sig.group(2).split(',') 
+                if p.strip()
+            ]
+            
+            new_params: list[str] = [
+                p.split(':')[0].split('=')[0].strip() 
+                for p in new_sig.group(2).split(',') 
+                if p.strip()
+            ]
+            
+            # Check for removed parameters
+            for param in orig_params:
+                if param not in new_params and param not in ['self', 'cls']:
+                    warnings.append(f"Parameter '{param}' removed - this may break code that calls this method")
+            
+            # Check for added required parameters (no default value)
+            for i, param in enumerate(new_params):
+                if param not in orig_params:
+                    # Check if parameter has default value
+                    param_section: str = new_sig.group(2).split(',')[i]
+                    if '=' not in param_section and param not in ['self', 'cls']:
+                        warnings.append(f"Required parameter '{param}' added - this will break existing code")
+        
+        return warnings
 
     async def replace(self, file_path: Path, old_text: str, new_text: str,
                      is_regex: bool = False, all_occurrences: bool = True) -> int:
@@ -203,14 +271,190 @@ class TextEditor:
             raise ValueError(f"Unknown trim mode: {mode}")
         
         await self._write_file_lines(file_path, lines)
+        
+    async def text_replace(self, file_path: Path, highlight: Union[str, dict[str, Any]], 
+                          replace_with: str, checkpoint: Optional[str] = None, 
+                          auto_checkpoint: bool = False) -> str:
+        """Advanced text replacement using hierarchical selection.
+        
+        Args:
+            file_path: Path to the file
+            highlight: Target specification in format "ClassName" or "ClassName.method_name" 
+                     DO NOT include 'class' or 'def' keywords, parentheses, or colons
+            replace_with: Replacement text (triple quotes recommended)
+            checkpoint: Optional name for the checkpoint
+            auto_checkpoint: Whether to auto-generate a checkpoint name
+        
+        Returns:
+            Success message
+        """
+        # Check if file exists
+        if not file_path.exists():
+            raise ValueError(f"File not found: {file_path}")
+            
+        # Detect file encoding and line endings
+        try:
+            import chardet
+            with open(file_path, 'rb') as f:
+                sample = f.read(4096)
+                encoding_result = chardet.detect(sample)
+                encoding = encoding_result['encoding'] or 'utf-8'
+                
+                # Check line endings
+                crlf_count = sample.count(b'\r\n')
+                lf_count = sample.count(b'\n') - crlf_count
+                line_ending = '\r\n' if crlf_count > lf_count else '\n'
+        except (ImportError, Exception):
+            encoding = 'utf-8'
+            line_ending = '\n'
+        
+        # Normalize replacement line endings to match the file
+        if '\n' in replace_with and line_ending != '\n':
+            replace_with = replace_with.replace('\n', line_ending)
+            
+        # Perform basic validation on highlight parameter
+        if isinstance(highlight, str):
+            # Common mistake: including class/def keywords
+            if highlight.startswith("class ") or highlight.startswith("def "):
+                raise ValueError(
+                    "HIGHLIGHT FORMAT ERROR: Do not include 'class' or 'def' keywords in highlight parameter.\n"
+                    f"  INCORRECT: '{highlight}'\n"
+                    f"  CORRECT: '{highlight.split()[1].rstrip(':').rstrip('()')}"
+                )
+            
+            # Common mistake: including parentheses or colons  
+            if "(" in highlight or ":" in highlight:
+                clean_highlight = highlight.split("(")[0].rstrip(":")
+                raise ValueError(
+                    "HIGHLIGHT FORMAT ERROR: Do not include parentheses or colons in highlight parameter.\n"
+                    f"  INCORRECT: '{highlight}'\n"
+                    f"  CORRECT: '{clean_highlight}'"
+                )
+        
+        # Check for triple quotes in replacement text
+        if not (replace_with.startswith('"""') or replace_with.startswith("'''")) and '\n' in replace_with:
+            raise ValueError(
+                "REPLACEMENT TEXT ERROR: Multi-line replacement text should use triple quotes to preserve indentation.\n"
+                "Example: replace_with=\"\"\"def method():\\n    return True\"\"\""
+            )
+            
+        # Validate replacement content for common definition errors
+        if isinstance(highlight, str) and "." in highlight and '\n' in replace_with:
+            # This is a method replacement - should start with def/async def
+            method_name = highlight.split(".")[-1]
+            first_line = replace_with.strip().split('\n')[0].strip()
+            
+            if not (first_line.startswith("def ") or first_line.startswith("async def ")):
+                raise ValueError(
+                    f"REPLACEMENT CONTENT ERROR: When replacing method '{method_name}', the replacement text must start with 'def {method_name}' or 'async def {method_name}'.\n"
+                    "Include the full method definition line."
+                )
+                
+            if method_name not in first_line:
+                raise ValueError(
+                    f"REPLACEMENT CONTENT ERROR: Method name mismatch. Replacing '{method_name}' but replacement defines a different method name in: '{first_line}'.\n"
+                    f"Method names must match."
+                )
+        
+        # Get original content
+        content: str = await self._read_file_content(file_path)
+        
+        # Start transaction
+        transaction_id: str = await self.transaction_manager.begin()
+        
+        try:
+            # Acquire lock to prevent concurrent modifications
+            await self.transaction_manager.acquire_file_lock(transaction_id, file_path)
+            
+            # Create checkpoint if requested
+            if checkpoint or auto_checkpoint:
+                checkpoint_name: str = checkpoint or f"text_replace_{file_path.name}_{transaction_id[:8]}"
+                await self.transaction_manager.create_checkpoint(transaction_id, file_path, checkpoint_name)
+            
+            # Get the appropriate parser based on file extension
+            parser = get_parser_for_file(file_path)
+            
+            # Parse the highlight pattern to find the target
+            result = parser.find_target(content, highlight)
+            
+            # Set line ending in result for preservation
+            result.line_ending = line_ending
+            
+            # Get original block for method signature compatibility check
+            original_block: str = content[result.start_pos:result.end_pos]
+            
+            # Check for method signature compatibility if this is a method replacement
+            if isinstance(highlight, str) and "." in highlight and file_path.suffix.lower() == '.py':
+                compatibility_warnings: list[str] = self._check_method_signature(original_block, replace_with)
+                if compatibility_warnings:
+                    warning_str: str = "\n- ".join(compatibility_warnings)
+                    print(f"⚠️ WARNING: Method signature changes detected:\n- {warning_str}")
+            
+            # Pre-validate replacement text syntax if it's a Python file
+            if file_path.suffix.lower() == '.py':
+                is_valid: bool
+                error_msg: str
+                is_valid, error_msg = self._validate_python_syntax(replace_with)
+                if not is_valid:
+                    return f"⚠️ SYNTAX ERROR in replacement code: {error_msg}\nNo changes applied."
+
+            # Check if replacement has inconsistent indentation
+            replacement_lines = replace_with.splitlines()
+            if len(replacement_lines) > 1:
+                indentation_chars = []
+                for line in replacement_lines[1:]:  # Skip first line
+                    if line.strip():  # Only non-empty lines
+                        leading_whitespace = line[:len(line) - len(line.lstrip())]
+                        if leading_whitespace:
+                            indentation_chars.append('\t' if '\t' in leading_whitespace else ' ')
+                
+                # If we have both tabs and spaces for indentation, warn the user
+                if ' ' in indentation_chars and '\t' in indentation_chars:
+                    return f"WARNING: Mixed indentation (tabs and spaces) detected in replacement text. "\
+                           f"The tool will attempt to fix this, but please use consistent indentation for best results."
+            
+            # Apply the replacement while preserving formatting
+            new_content: str = parser.apply_replacement(content, result, replace_with)
+            
+            # Validate the resulting content for syntax errors (for Python files)
+            if file_path.suffix.lower() == '.py':
+                is_valid: bool
+                error_msg: str
+                is_valid, error_msg = self._validate_python_syntax(new_content)
+                if not is_valid:
+                    return f"⚠️ ERROR: The replacement would create invalid Python: {error_msg}\nChanges NOT applied."
+            
+            # Write the modified content with original encoding
+            await self.transaction_manager.write_to_temp(
+                transaction_id, file_path, new_content.encode(encoding, errors='replace')
+            )
+            
+            # Commit the transaction
+            await self.transaction_manager.commit(transaction_id)
+            
+            return f"✓ Successfully replaced content in {file_path}"
+            
+        except Exception as e:
+            # Rollback on any error
+            await self.transaction_manager.rollback(transaction_id)
+            raise ValueError(f"Failed to replace text: {str(e)}")
 
     async def _read_file_content(self, file_path: Path) -> str:
-        # Use memory manager for efficient reading
-        if file_path.stat().st_size > self.memory_manager.config.memory_mapped_threshold:
-            return await self.memory_manager.read_mapped_file(file_path)
-        else:
-            with open(file_path, 'r', encoding='utf-8') as f:
-                return f.read()
+        """Read file content with encoding detection."""
+        # Import chardet if available
+        try:
+            import chardet
+            with open(file_path, 'rb') as f:
+                raw_data = f.read(4096)
+                encoding_result = chardet.detect(raw_data)
+                
+            encoding = encoding_result['encoding'] or 'utf-8'
+        except (ImportError, Exception):
+            encoding = 'utf-8'  # Default to UTF-8 if detection fails
+        
+        # Read with detected encoding
+        with open(file_path, 'r', encoding=encoding, errors='replace') as f:
+            return f.read()
 
     async def _read_file_lines(self, file_path: Path) -> list[str]:
         content: str = await self._read_file_content(file_path)
