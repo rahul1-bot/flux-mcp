@@ -34,12 +34,15 @@ class TextEditor:
         self.memory_manager: MemoryManager = memory_manager
         
     def _validate_python_syntax(self, code: str) -> tuple[bool, str]:
-        """Rigorous Python code syntax validation with AST parsing.
+        """Advanced Python code syntax validation with comprehensive error detection.
         
-        Performs comprehensive syntax checking including:
-        - AST parsing to catch any syntax errors
-        - Feature detection for Python version compatibility
-        - Common code smells and potential issues
+        Performs rigorous syntax and compatibility checking including:
+        - AST parsing to catch syntax errors
+        - Static analysis for variable usage, imports, and function calls
+        - Type compatibility and annotation validation
+        - Python version compatibility analysis
+        - Indentation and whitespace consistency checks
+        - Critical code patterns that may introduce bugs
         
         Args:
             code: Python code to validate
@@ -47,16 +50,18 @@ class TextEditor:
         Returns:
             Tuple of (is_valid, detailed_error_message)
         """
-        # Basic syntax validation
+        # Basic syntax validation using AST parsing
         try:
             import ast
             ast_tree = ast.parse(code)
         except SyntaxError as e:
-            # Enhanced error reporting with exact location and visualization
+            # Enhanced error reporting with detailed location and visualization
             line_content: str = ""
             pointer: str = ""
-            if e.lineno <= len(code.splitlines()):
-                line_content = code.splitlines()[e.lineno-1]
+            lines = code.splitlines()
+            
+            if e.lineno <= len(lines):
+                line_content = lines[e.lineno-1]
                 if e.offset:
                     pointer = " " * max(0, e.offset-1) + "^" * min(5, len(line_content) - e.offset + 1)
             
@@ -71,9 +76,11 @@ class TextEditor:
         except Exception as e:
             return False, f"CRITICAL PARSING ERROR: {str(e)}"
         
-        # Advanced feature detection for version compatibility
-        compatibility_issues: list[dict[str, Any]] = []
+        # Advanced static analysis
+        critical_errors = []
+        warnings = []
         
+        # 1. Advanced feature detection for version compatibility
         try:
             import sys
             import re
@@ -83,160 +90,339 @@ class TextEditor:
             # Detect current Python version
             current_python_version = tuple(map(int, platform.python_version_tuple()))
             
-            # Feature compatibility checks
+            # Feature compatibility checks - CRITICAL errors that BLOCK execution
             incompatible_features = []
             
-            # 1. Check for f-strings (Python 3.6+)
-            if re.search(r'f[\'"]', code):
-                if current_python_version < (3, 6):
+            # Check for Python 3.6+ features
+            if current_python_version < (3, 6):
+                # f-strings (Python 3.6+)
+                if re.search(r'f[\'"]', code):
+                    line_numbers = [i+1 for i, line in enumerate(code.splitlines()) if re.search(r'f[\'"]', line)]
                     incompatible_features.append({
                         "feature": "f-strings", 
                         "min_version": "3.6",
-                        "line_numbers": [i+1 for i, line in enumerate(code.splitlines()) if re.search(r'f[\'"]', line)]
+                        "line_numbers": line_numbers
                     })
             
-            # 2. Check for walrus operator := (Python 3.8+)
-            if re.search(r':=', code):
-                if current_python_version < (3, 8):
+            # Check for Python 3.8+ features
+            if current_python_version < (3, 8):
+                # walrus operator := (Python 3.8+)
+                if re.search(r':=', code):
+                    line_numbers = [i+1 for i, line in enumerate(code.splitlines()) if ":=" in line]
                     incompatible_features.append({
                         "feature": "assignment expressions (walrus operator :=)", 
                         "min_version": "3.8",
-                        "line_numbers": [i+1 for i, line in enumerate(code.splitlines()) if ":=" in line]
+                        "line_numbers": line_numbers
                     })
                     
-            # 3. Check for match/case syntax (Python 3.10+)
-            if re.search(r'\bmatch\b.*?:', code) and re.search(r'\bcase\b.*?:', code):
-                if current_python_version < (3, 10):
-                    incompatible_features.append({
-                        "feature": "match/case pattern matching", 
-                        "min_version": "3.10",
-                        "line_numbers": [i+1 for i, line in enumerate(code.splitlines()) 
-                                       if re.search(r'\bmatch\b.*?:', line) or re.search(r'\bcase\b.*?:', line)]
-                    })
-            
-            # 4. Check for union operator | in type hints (Python 3.10+)
-            if re.search(r':\s*\w+\s*\|\s*\w+', code):
-                if current_python_version < (3, 10):
-                    incompatible_features.append({
-                        "feature": "union type operator |", 
-                        "min_version": "3.10",
-                        "line_numbers": [i+1 for i, line in enumerate(code.splitlines()) 
-                                       if re.search(r':\s*\w+\s*\|\s*\w+', line)]
-                    })
-                    
-            # 5. Check for positional-only parameters (Python 3.8+)
-            if re.search(r'\([^)]*/, ', code):
-                if current_python_version < (3, 8):
+                # positional-only parameters (Python 3.8+)
+                if re.search(r'\([^)]*/, ', code):
+                    line_numbers = [i+1 for i, line in enumerate(code.splitlines()) if re.search(r'\([^)]*/, ', line)]
                     incompatible_features.append({
                         "feature": "positional-only parameters", 
                         "min_version": "3.8",
-                        "line_numbers": [i+1 for i, line in enumerate(code.splitlines()) if re.search(r'\([^)]*/, ', line)]
+                        "line_numbers": line_numbers
                     })
                     
-            # Format incompatibility report
+            # Check for Python 3.9+ features  
+            if current_python_version < (3, 9):
+                # Dictionary union operators (Python 3.9+)
+                if re.search(r'[\w\s][\]\}]\s*\|\s*[\{\[]', code):
+                    line_numbers = [i+1 for i, line in enumerate(code.splitlines()) 
+                                  if re.search(r'[\w\s][\]\}]\s*\|\s*[\{\[]', line)]
+                    incompatible_features.append({
+                        "feature": "dictionary union operators", 
+                        "min_version": "3.9",
+                        "line_numbers": line_numbers
+                    })
+            
+            # Check for Python 3.10+ features
+            if current_python_version < (3, 10):
+                # match/case pattern matching (Python 3.10+)
+                if re.search(r'\bmatch\b.*?:', code) and re.search(r'\bcase\b.*?:', code):
+                    line_numbers = [i+1 for i, line in enumerate(code.splitlines()) 
+                                  if re.search(r'\bmatch\b.*?:', line) or re.search(r'\bcase\b.*?:', line)]
+                    incompatible_features.append({
+                        "feature": "match/case pattern matching", 
+                        "min_version": "3.10",
+                        "line_numbers": line_numbers
+                    })
+                
+                # union operator | in type hints (Python 3.10+)
+                if re.search(r':\s*\w+\s*\|\s*\w+', code):
+                    line_numbers = [i+1 for i, line in enumerate(code.splitlines()) 
+                                  if re.search(r':\s*\w+\s*\|\s*\w+', line)]
+                    incompatible_features.append({
+                        "feature": "union type operator |", 
+                        "min_version": "3.10",
+                        "line_numbers": line_numbers
+                    })
+
+            # Add more Python 3.11+ feature checks as needed
+            
+            # Format incompatibility report - CRITICAL ERROR
             if incompatible_features:
-                error_msg = "PYTHON VERSION COMPATIBILITY ISSUES:\n\n"
+                error_msg = "CRITICAL PYTHON VERSION COMPATIBILITY ERRORS:\n\n"
                 for i, feature in enumerate(incompatible_features, 1):
-                    error_msg += (f"{i}. The code uses {feature['feature']} which requires Python {feature['min_version']}+\n"
+                    error_msg += (f"{i}. This code uses {feature['feature']} which requires Python {feature['min_version']}+\n"
                                 f"   Found at line(s): {', '.join(map(str, feature['line_numbers']))}\n\n")
                 error_msg += f"Current Python version: {'.'.join(map(str, current_python_version))}\n\n"
-                error_msg += "These features may cause runtime errors if run on older Python versions."
-                compatibility_issues.append({"message": error_msg, "is_critical": False})
+                error_msg += "Execution BLOCKED: These features will cause runtime errors if used."
+                critical_errors.append(error_msg)
         
         except Exception as e:
-            # Non-critical - version compatibility check failed but syntax is still valid
-            compatibility_issues.append({
-                "message": f"Failed to check Python version compatibility: {str(e)}",
-                "is_critical": False
-            })
+            # Fail safe: if version check fails, show the error but continue
+            warnings.append(f"Failed to check Python version compatibility: {str(e)}")
             
-        # Advanced code quality checks
+        # 2. Advanced static analysis for code quality and correctness
         try:
-            # AST-based static analysis
-            code_issues: list[dict[str, Any]] = []
+            # Track defined variables, imports, and function definitions
+            defined_vars = {}
+            undefined_vars = []
+            imports = []
+            defined_funcs = []
+            used_funcs = []
+            dangerous_funcs = []
             
-            # Track variable definitions and usage for basic type checking
-            defined_vars: dict[str, list[ast.AST]] = {}
-            
-            # Analyze the AST
+            # Analyze the AST for various issues
             for node in ast.walk(ast_tree):
-                # Check for undefined variables
-                if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Load):
-                    var_name = node.id
-                    # Skip builtins and common imports
-                    if (var_name not in dir(builtins) and var_name not in ('self', 'cls', 'super')
-                            and var_name not in defined_vars):
-                        # This is a potential undefined variable
-                        code_issues.append({
-                            "type": "UNDEFINED_VARIABLE",
-                            "message": f"Potential undefined variable: '{var_name}'",
-                            "node": node,
-                            "is_critical": False
-                        })
-                
-                # Track variable definitions
-                elif isinstance(node, ast.Name) and isinstance(node.ctx, ast.Store):
-                    var_name = node.id
-                    if var_name not in defined_vars:
-                        defined_vars[var_name] = []
-                    defined_vars[var_name].append(node)
-                    
-                # Check for common critical issues
-                elif isinstance(node, ast.Call) and isinstance(node.func, ast.Name):
+                # Check for dangerous function calls 
+                if isinstance(node, ast.Call) and isinstance(node.func, ast.Name):
                     func_name = node.func.id
                     
-                    # Check for dangerous functions
-                    if func_name in ('eval', 'exec'):
-                        code_issues.append({
-                            "type": "DANGEROUS_FUNCTION",
-                            "message": f"Potential security risk: usage of '{func_name}' function",
-                            "node": node,
-                            "is_critical": True
+                    # Detect dangerous built-ins that could lead to security issues
+                    if func_name in ('eval', 'exec', '__import__'):
+                        dangerous_funcs.append({
+                            "name": func_name,
+                            "line": getattr(node, "lineno", "unknown"),
+                            "message": f"Dangerous built-in function '{func_name}' used, which is a security risk"
                         })
+                        
+                # Track variable definitions and usages
+                elif isinstance(node, ast.Name):
+                    if isinstance(node.ctx, ast.Store):
+                        # Variable definition
+                        var_name = node.id
+                        defined_vars[var_name] = getattr(node, "lineno", -1)
+                    elif isinstance(node.ctx, ast.Load):
+                        # Variable usage - check if it's defined
+                        var_name = node.id
+                        if (var_name not in defined_vars and 
+                            var_name not in dir(builtins) and 
+                            var_name not in ('self', 'cls', 'super')):
+                            undefined_vars.append({
+                                "name": var_name,
+                                "line": getattr(node, "lineno", "unknown")
+                            })
                 
-                # Check for unused imports (simplified)
-                elif isinstance(node, ast.Import) or isinstance(node, ast.ImportFrom):
-                    # This is just a simple check - a full implementation would track usage
+                # Track imports
+                elif isinstance(node, (ast.Import, ast.ImportFrom)):
                     if isinstance(node, ast.Import):
-                        for name in node.names:
-                            imported_name = name.asname or name.name
-                            # Add to defined vars to track usage
-                            if imported_name not in defined_vars:
-                                defined_vars[imported_name] = []
-                            defined_vars[imported_name].append(node)
-                    
-            # Format code issues
-            critical_issues = [issue for issue in code_issues if issue["is_critical"]]
-            warning_issues = [issue for issue in code_issues if not issue["is_critical"]]
-            
-            if critical_issues:
-                error_msg = "CRITICAL CODE QUALITY ISSUES:\n\n"
-                for i, issue in enumerate(critical_issues, 1):
-                    lineno = getattr(issue["node"], "lineno", "unknown")
-                    col_offset = getattr(issue["node"], "col_offset", "unknown")
-                    error_msg += f"{i}. {issue['type']}: {issue['message']} at line {lineno}, col {col_offset}\n"
-                return False, error_msg
+                        for alias in node.names:
+                            imports.append({
+                                "module": alias.name,
+                                "alias": alias.asname,
+                                "line": getattr(node, "lineno", "unknown")
+                            })
+                    else:  # ImportFrom
+                        module = node.module or ""
+                        for alias in node.names:
+                            imports.append({
+                                "module": f"{module}.{alias.name}" if module else alias.name,
+                                "alias": alias.asname,
+                                "from_import": True,
+                                "line": getattr(node, "lineno", "unknown")
+                            })
                 
-            # Non-critical issues are just warnings
-            if warning_issues:
-                warning_msg = "CODE QUALITY WARNINGS (not preventing execution):\n\n"
-                for i, issue in enumerate(warning_issues, 1):
-                    lineno = getattr(issue["node"], "lineno", "unknown")
-                    warning_msg += f"{i}. {issue['message']} at line {lineno}\n"
-                compatibility_issues.append({"message": warning_msg, "is_critical": False})
+                # Track function definitions and calls
+                elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                    func_name = node.name
+                    defined_funcs.append({
+                        "name": func_name,
+                        "line": getattr(node, "lineno", "unknown")
+                    })
+            
+            # CRITICAL ERRORS - collect issues that should block execution
+            
+            # Undefined variables are CRITICAL errors
+            if undefined_vars:
+                error_msg = "CRITICAL UNDEFINED VARIABLE ERRORS:\n\n"
+                for i, var in enumerate(undefined_vars, 1):
+                    error_msg += f"{i}. Undefined variable '{var['name']}' used at line {var['line']}\n"
+                error_msg += "\nExecution BLOCKED: Using undefined variables will cause runtime errors."
+                critical_errors.append(error_msg)
+            
+            # Dangerous function usage is a CRITICAL error
+            if dangerous_funcs:
+                error_msg = "CRITICAL SECURITY RISK DETECTED:\n\n"
+                for i, func in enumerate(dangerous_funcs, 1):
+                    error_msg += f"{i}. {func['message']} at line {func['line']}\n"
+                error_msg += "\nExecution BLOCKED: These functions create security vulnerabilities."
+                critical_errors.append(error_msg)
+            
+        except Exception as e:
+            warnings.append(f"Static analysis error: {str(e)}")
+            
+        # 3. Type annotation consistency checks
+        try:
+            type_issues = []
+            
+            # Check for inconsistent type annotations
+            class TypeVisitor(ast.NodeVisitor):
+                def __init__(self):
+                    self.annotated_vars = {}
+                    self.inconsistent_types = []
+                    
+                def visit_AnnAssign(self, node):
+                    if isinstance(node.target, ast.Name):
+                        var_name = node.target.id
+                        if hasattr(ast, 'unparse'):
+                            type_str = ast.unparse(node.annotation)
+                        else:
+                            # Fallback for older Python versions
+                            type_str = str(node.annotation)
+                            
+                        if var_name in self.annotated_vars:
+                            # Check if the same variable has different type annotations
+                            if self.annotated_vars[var_name] != type_str:
+                                self.inconsistent_types.append({
+                                    "name": var_name,
+                                    "line": node.lineno,
+                                    "old_type": self.annotated_vars[var_name],
+                                    "new_type": type_str
+                                })
+                        else:
+                            self.annotated_vars[var_name] = type_str
+                    
+                    # Continue visiting children
+                    self.generic_visit(node)
+                    
+                def visit_FunctionDef(self, node):
+                    # Track function parameter and return type annotations
+                    # This is simplified, full implementation would check parameters
+                    if node.returns:
+                        if hasattr(ast, 'unparse'):
+                            return_type = ast.unparse(node.returns)
+                        else:
+                            # Fallback for older Python versions
+                            return_type = str(node.returns)
+                            
+                    # Continue visiting children
+                    self.generic_visit(node)
+            
+            # Run the type visitor
+            visitor = TypeVisitor()
+            visitor.visit(ast_tree)
+            
+            # Report inconsistent type annotations as CRITICAL errors
+            if visitor.inconsistent_types:
+                error_msg = "CRITICAL TYPE ANNOTATION ERRORS:\n\n"
+                for i, issue in enumerate(visitor.inconsistent_types, 1):
+                    error_msg += (f"{i}. Inconsistent type annotations for variable '{issue['name']}'\n"
+                                f"   At line {issue['line']}: {issue['new_type']}\n"
+                                f"   Previously defined as: {issue['old_type']}\n")
+                error_msg += "\nExecution BLOCKED: Inconsistent type annotations will cause errors in typed code."
+                critical_errors.append(error_msg)
                 
         except Exception as e:
-            # Non-critical - static analysis failed but syntax is still valid
-            compatibility_issues.append({
-                "message": f"Code quality analysis error: {str(e)}",
-                "is_critical": False
-            })
+            warnings.append(f"Type annotation analysis error: {str(e)}")
             
-        # If we have non-critical issues, return a warning, otherwise return success
-        if compatibility_issues:
-            warnings_text = "\n\n".join(issue["message"] for issue in compatibility_issues)
-            return True, f"VALID SYNTAX WITH WARNINGS:\n\n{warnings_text}"
+        # 4. Check for indentation consistency
+        try:
+            lines = code.splitlines()
+            indent_type = None  # 'spaces' or 'tabs'
+            indent_size = None  # Standard unit size for spaces
+            indentation_issues = []
             
+            for i, line in enumerate(lines):
+                if not line.strip():  # Skip empty lines
+                    continue
+                    
+                # Extract the leading whitespace
+                indent = len(line) - len(line.lstrip())
+                if indent > 0:
+                    line_indent = line[:indent]
+                    
+                    # Determine indent type from first indented line
+                    if indent_type is None:
+                        if '\t' in line_indent:
+                            indent_type = 'tabs'
+                        else:
+                            indent_type = 'spaces'
+                            
+                    # Check for mixed indentation
+                    if '\t' in line_indent and ' ' in line_indent:
+                        indentation_issues.append({
+                            "line": i + 1,
+                            "message": f"Mixed tabs and spaces in indentation",
+                            "critical": True
+                        })
+                    
+                    # Check consistency with established indent type
+                    elif indent_type == 'spaces' and '\t' in line_indent:
+                        indentation_issues.append({
+                            "line": i + 1,
+                            "message": f"Using tabs while the rest of the code uses spaces",
+                            "critical": True
+                        })
+                    elif indent_type == 'tabs' and ' ' in line_indent and '\t' not in line_indent:
+                        indentation_issues.append({
+                            "line": i + 1,
+                            "message": f"Using spaces while the rest of the code uses tabs",
+                            "critical": True
+                        })
+                    
+                    # For spaces, check multiple of standard indent
+                    if indent_type == 'spaces':
+                        # Try to detect indent size if not already known
+                        if indent_size is None and indent > 0:
+                            # Check common indent sizes
+                            for size in [2, 4, 8]:
+                                if indent % size == 0:
+                                    indent_size = size
+                                    break
+                            # If still not detected, default to 4
+                            if indent_size is None:
+                                indent_size = 4
+                        
+                        # Verify indent is multiple of standard size
+                        if indent_size and indent % indent_size != 0:
+                            indentation_issues.append({
+                                "line": i + 1,
+                                "message": f"Indentation of {indent} spaces is not a multiple of {indent_size}",
+                                "critical": True
+                            })
+            
+            # Report indentation issues as CRITICAL errors
+            if indentation_issues:
+                error_msg = "CRITICAL INDENTATION ERRORS:\n\n"
+                for i, issue in enumerate(indentation_issues, 1):
+                    error_msg += f"{i}. Line {issue['line']}: {issue['message']}\n"
+                
+                error_msg += "\nExecution BLOCKED: Inconsistent indentation will cause Python to behave unpredictably."
+                critical_errors.append(error_msg)
+                
+        except Exception as e:
+            warnings.append(f"Indentation analysis error: {str(e)}")
+            
+        # If any critical errors are found, return them as validation failure
+        if critical_errors:
+            final_error_msg = "MULTIPLE CRITICAL ERRORS DETECTED - EXECUTION BLOCKED\n\n"
+            final_error_msg += "\n\n".join(critical_errors)
+            
+            if warnings:
+                final_error_msg += "\n\nADDITIONAL WARNINGS (not blocking execution):\n"
+                final_error_msg += "\n".join(f"- {warning}" for warning in warnings)
+                
+            return False, final_error_msg
+            
+        # If only warnings, return success with warnings
+        if warnings:
+            warning_msg = "CODE VALIDATION WARNINGS (not blocking execution):\n\n"
+            warning_msg += "\n".join(f"- {warning}" for warning in warnings)
+            return True, warning_msg
+            
+        # All validation passed
         return True, ""
             
     def _calculate_similarity(self, str1: str, str2: str) -> float:
