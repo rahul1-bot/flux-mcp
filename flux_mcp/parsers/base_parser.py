@@ -135,6 +135,67 @@ class BaseParser(ABC):
             # Replace new_lines with converted lines for further processing
             new_lines = converted_lines
         
+        # CRITICAL: Validate indentation hierarchy consistency
+        # Check that deeper blocks maintain their relationship to parent blocks
+        indentation_errors: list[dict[str, Any]] = []
+        if len(new_lines) > 1:
+            # Extract blocks structure (if, for, while, def, class, etc)
+            block_starters: list[int] = []
+            block_structure: dict[int, dict[str, Any]] = {}
+            
+            # First pass - identify blocks and their indentation requirements
+            for i, line in enumerate(new_lines):
+                stripped: str = line.strip()
+                if not stripped:
+                    continue
+                    
+                # Check if this is a block-starting line (ends with colon)
+                if stripped.endswith(':') and not stripped.startswith('#'):
+                    # This line starts a new block
+                    block_starters.append(i)
+                    block_structure[i] = {
+                        "indent_level": len(line) - len(line.lstrip()),
+                        "requires_indent": True,
+                        "children": []
+                    }
+            
+            # Second pass - validate block child indentation
+            for block_start in block_starters:
+                block_info = block_structure[block_start]
+                block_indent = block_info["indent_level"]
+                
+                # Look at the next line after the block starter
+                if block_start + 1 < len(new_lines):
+                    next_line = new_lines[block_start + 1].rstrip()
+                    if next_line.strip():  # If not empty
+                        next_indent = len(next_line) - len(next_line.lstrip())
+                        
+                        # Python requires block contents to be indented deeper than the block starter
+                        if next_indent <= block_indent:
+                            # This is an indentation hierarchy error
+                            indentation_errors.append({
+                                "line_number": block_start + 2,  # 1-indexed for human readability
+                                "parent_line_number": block_start + 1,
+                                "parent_line": new_lines[block_start].strip(),
+                                "line_content": next_line,
+                                "error_type": "INVALID_BLOCK_STRUCTURE",
+                                "message": f"Line after block definition must be indented. Block starts with '{new_lines[block_start].strip()}'",
+                                "suggestion": "Indent the line after any line ending with ':' in Python"
+                            })
+            
+            # If indentation hierarchy errors were found, raise an exception
+            if indentation_errors:
+                error_msg = "CRITICAL INDENTATION HIERARCHY ERROR:\n\n"
+                
+                for i, error in enumerate(indentation_errors, 1):
+                    error_msg += f"ERROR #{i}: {error['error_type']} - {error['message']}\n"
+                    error_msg += f"Block starts at line {error['parent_line_number']}: {error['parent_line']}\n"
+                    error_msg += f"Invalid indentation at line {error['line_number']}: {error['line_content']}\n"
+                    error_msg += f"Suggestion: {error['suggestion']}\n\n"
+                
+                error_msg += "\nPython requires consistent indentation hierarchy. Block contents must be indented deeper than the block starter."
+                raise ValueError(error_msg)
+        
         # Process the new text with proper hierarchical indentation
         result_lines: list[str] = []
         

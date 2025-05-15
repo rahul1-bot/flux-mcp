@@ -619,87 +619,117 @@ class TextEditor:
                     await self.transaction_manager.rollback(transaction_id)
                     return result_data
 
-            # Enhanced indentation validation
+            # CRITICAL: Enhanced indentation validation with strict rules
             if len(replace_with.splitlines()) > 1:
-                # Detect indentation inconsistencies
-                has_inconsistent_indentation: bool = False
-                indentation_chars: list[str] = []
-                indentation_sizes: list[int] = []
-                mixed_indentation_lines: list[int] = []
-                irregular_indentation_lines: list[int] = []
+                # Track detailed indentation issues
+                indentation_errors: list[dict[str, Any]] = []
                 
                 # Extract first line indentation style for baseline
-                first_content_line_idx: int = 0
+                first_content_line_idx: int = -1
                 for idx, line in enumerate(replace_with.splitlines()):
                     if line.strip():
                         first_content_line_idx = idx
                         break
                         
-                first_content_line: str = replace_with.splitlines()[first_content_line_idx]
-                first_leading_whitespace: str = first_content_line[:len(first_content_line) - len(first_content_line.lstrip())]
-                base_indent_char: str = '\t' if '\t' in first_leading_whitespace else ' '
-                
-                # Validate all non-empty lines
-                for idx, line in enumerate(replace_with.splitlines()[1:], 1):  # Skip first line, 1-indexed
-                    if line.strip():  # Only non-empty lines
+                if first_content_line_idx == -1:
+                    # No content lines found - unusual but not an error
+                    pass
+                else:
+                    first_content_line: str = replace_with.splitlines()[first_content_line_idx]
+                    first_leading_whitespace: str = first_content_line[:len(first_content_line) - len(first_content_line.lstrip())]
+                    base_indent_char: str = '\t' if '\t' in first_leading_whitespace else ' '
+                    base_indent_size: int = len(first_leading_whitespace)
+                    
+                    # Calculate standard indentation unit (typically 2, 4, or 8 spaces)
+                    indent_unit: int = 4  # Default
+                    if base_indent_char == ' ' and base_indent_size > 0:
+                        for line in replace_with.splitlines()[first_content_line_idx+1:]:
+                            if line.strip():
+                                curr_whitespace: str = line[:len(line) - len(line.lstrip())]
+                                if len(curr_whitespace) > base_indent_size:
+                                    indent_unit = len(curr_whitespace) - base_indent_size
+                                    break
+                    
+                    # Validate all non-empty lines with extremely strict rules
+                    for idx, line in enumerate(replace_with.splitlines()):
+                        if not line.strip():  # Skip empty lines
+                            continue
+                            
+                        # Extract the leading whitespace
                         leading_whitespace: str = line[:len(line) - len(line.lstrip())]
-                        if leading_whitespace:
-                            current_indent_char: str = '\t' if '\t' in leading_whitespace else ' '
-                            indentation_chars.append(current_indent_char)
-                            indentation_sizes.append(len(leading_whitespace))
-                            
-                            # Check for mixed indentation within the line
-                            if ' ' in leading_whitespace and '\t' in leading_whitespace:
-                                has_inconsistent_indentation = True
-                                mixed_indentation_lines.append(idx)
-                            
-                            # Check for indentation character inconsistency with first line
-                            if current_indent_char != base_indent_char:
-                                has_inconsistent_indentation = True
-                                mixed_indentation_lines.append(idx)
-                                
-                # Check indentation increments for consistency (spaces only)
-                if indentation_sizes and base_indent_char == ' ':
-                    # Create a set of indentation level differences to determine if 
-                    # increments are consistent (should all be the same, typically 2, 4, or 8)
-                    indentation_diffs: set[int] = set()
-                    sorted_sizes: list[int] = sorted(set(indentation_sizes))
-                    
-                    for i in range(1, len(sorted_sizes)):
-                        diff: int = sorted_sizes[i] - sorted_sizes[i-1]
-                        if diff > 0:
-                            indentation_diffs.add(diff)
-                    
-                    # If we have more than one indentation increment size, flag it
-                    if len(indentation_diffs) > 1:
-                        has_inconsistent_indentation = True
-                        result_data["errors"].append(
-                            f"Inconsistent indentation increments detected: {indentation_diffs}"
-                        )
+                        whitespace_len: int = len(leading_whitespace)
+                        
+                        # CRITICAL ERROR: Mixed tabs and spaces
+                        if ' ' in leading_whitespace and '\t' in leading_whitespace:
+                            error_info = {
+                                "line_number": idx + 1,
+                                "line_content": line,
+                                "error_type": "MIXED_INDENTATION",
+                                "message": f"Line {idx + 1} contains both tabs AND spaces for indentation",
+                                "critical": True,
+                                "suggestion": "Choose either tabs OR spaces for indentation, never mix them"
+                            }
+                            indentation_errors.append(error_info)
+                        
+                        # CRITICAL ERROR: Inconsistent indentation character
+                        if leading_whitespace and (('\t' in leading_whitespace and base_indent_char == ' ') or 
+                                                (' ' in leading_whitespace and base_indent_char == '\t')):
+                            error_info = {
+                                "line_number": idx + 1,
+                                "line_content": line,
+                                "error_type": "INCONSISTENT_CHAR",
+                                "message": f"Line {idx + 1} uses {' ' if '\t' in leading_whitespace else 'tabs'} while the rest of the code uses {base_indent_char}",
+                                "critical": True,
+                                "suggestion": f"Use consistent {base_indent_char} throughout the entire code block"
+                            }
+                            indentation_errors.append(error_info)
+                        
+                        # CRITICAL ERROR: Indentation not a multiple of the standard unit
+                        if base_indent_char == ' ' and whitespace_len % indent_unit != 0 and whitespace_len > 0:
+                            error_info = {
+                                "line_number": idx + 1,
+                                "line_content": line,
+                                "error_type": "INVALID_INDENT_SIZE",
+                                "message": f"Line {idx + 1} has {whitespace_len} spaces indentation which is not a multiple of {indent_unit}",
+                                "critical": True,
+                                "suggestion": f"Use indentation that's a multiple of {indent_unit} spaces"
+                            }
+                            indentation_errors.append(error_info)
                 
-                # Error messaging for mixed indentation
-                if ' ' in indentation_chars and '\t' in indentation_chars:
-                    has_inconsistent_indentation = True
-                    error_msg: str = (
-                        "CRITICAL INDENTATION ERROR: Mixed indentation (tabs and spaces) detected.\n"
-                        f"Lines with mixed indentation: {mixed_indentation_lines}\n"
-                        "Python is sensitive to consistent indentation. Please use either tabs OR spaces, not both."
-                    )
-                    result_data["errors"].append(error_msg)
-                    result_data["message"] = error_msg
-                    await self.transaction_manager.rollback(transaction_id)
-                    return result_data
+                # If any critical indentation errors were found, halt execution immediately
+                if indentation_errors:
+                    # Format a detailed error message with line numbers and code snippets
+                    error_msg: str = "CRITICAL INDENTATION ERRORS DETECTED:\n\n"
                     
-                # Error messaging for irregular indentation
-                if irregular_indentation_lines:
-                    has_inconsistent_indentation = True
-                    error_msg: str = (
-                        "CRITICAL INDENTATION ERROR: Irregular indentation pattern detected.\n"
-                        f"Lines with irregular indentation: {irregular_indentation_lines}\n"
-                        "Python requires consistent indentation patterns. Please check your code."
-                    )
+                    for i, error in enumerate(indentation_errors, 1):
+                        error_msg += f"ERROR #{i}: {error['error_type']} - {error['message']}\n"
+                        
+                        # Create a visual representation of the indentation problem
+                        line_content = error['line_content']
+                        leading_whitespace = line_content[:len(line_content) - len(line_content.lstrip())]
+                        
+                        # Add a visual marker for the indentation character issues
+                        whitespace_marker = ""
+                        for char in leading_whitespace:
+                            if char == ' ':
+                                whitespace_marker += "·"  # Visualize spaces with middle dots
+                            elif char == '\t':
+                                whitespace_marker += "→"  # Visualize tabs with right arrows
+                        
+                        # Show the code with highlighted indentation markers
+                        error_msg += f"    {line_content}\n"
+                        error_msg += f"    {whitespace_marker}{'^' * len(line_content.lstrip())}\n"
+                        error_msg += f"Suggestion: {error['suggestion']}\n\n"
+                    
+                    error_msg += "\nPython is extremely sensitive to proper indentation. Fix these errors before proceeding."
+                    error_msg += "\nNo changes have been applied to your code."
+                    
+                    # Add the error message to result_data
                     result_data["errors"].append(error_msg)
                     result_data["message"] = error_msg
+                    result_data["critical_indentation_errors"] = indentation_errors
+                    
+                    # Rollback any transaction and return with failure
                     await self.transaction_manager.rollback(transaction_id)
                     return result_data
             

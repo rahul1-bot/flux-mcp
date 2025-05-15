@@ -114,6 +114,9 @@ class PythonParser(BaseParser):
     def apply_replacement(self, content: str, result: ParserResult, replace_with: str) -> str:
         original_block: str = content[result.start_pos:result.end_pos]
         
+        # CRITICAL: Validate indentation structure of replacement code before applying
+        self._validate_indentation_structure(replace_with, result.metadata.get("is_class", False))
+        
         # Validate replacement compatibility
         warnings = self._validate_compatibility(original_block, replace_with, result.metadata)
         if warnings:
@@ -141,6 +144,167 @@ class PythonParser(BaseParser):
         # Apply the replacement
         new_content: str = content[:result.start_pos] + formatted_replacement + content[result.end_pos:]
         return new_content
+        
+    def _validate_indentation_structure(self, code: str, is_class: bool = False) -> None:
+        """
+        CRITICAL: Strictly validate Python indentation structure to ensure it follows
+        proper hierarchical rules. Raises ValueError with detailed messages for any
+        indentation issues found.
+        
+        Args:
+            code: Python code block to validate
+            is_class: Whether this is a class definition block
+            
+        Raises:
+            ValueError: Detailed error message for any indentation issues
+        """
+        lines = code.splitlines()
+        if not lines:
+            return
+            
+        # Track class/method definition blocks and their required indentation
+        blocks: list[dict[str, Any]] = []
+        indentation_errors: list[dict[str, Any]] = []
+        
+        # First, check for mixed indentation (tabs vs spaces)
+        has_tabs = False
+        has_spaces = False
+        
+        for i, line in enumerate(lines):
+            if not line.strip():
+                continue
+                
+            leading_whitespace = line[:len(line) - len(line.lstrip())]
+            if '\t' in leading_whitespace:
+                has_tabs = True
+            if ' ' in leading_whitespace and leading_whitespace:
+                has_spaces = True
+                
+            # Critical error: Both tabs and spaces in the same line
+            if '\t' in leading_whitespace and ' ' in leading_whitespace and leading_whitespace.strip():
+                indentation_errors.append({
+                    "line_number": i + 1,
+                    "line_content": line,
+                    "error_type": "MIXED_INDENTATION_CHARACTERS",
+                    "message": f"Line {i+1} uses both tabs AND spaces for indentation",
+                    "suggestion": "Use either tabs OR spaces consistently, never mix them"
+                })
+        
+        # Critical error: Mixed tabs and spaces across different lines
+        if has_tabs and has_spaces:
+            indentation_errors.append({
+                "line_number": 0,  # General file issue
+                "error_type": "INCONSISTENT_INDENTATION_STYLE",
+                "message": "Some lines use tabs while others use spaces for indentation",
+                "suggestion": "Convert all indentation to either tabs OR spaces, but not both"
+            })
+            
+        # Check for block structure issues
+        current_depth = 0
+        expected_indent = None
+        
+        for i, line in enumerate(lines):
+            if not line.strip():
+                continue
+                
+            stripped = line.strip()
+            
+            # If this line defines a block (ends with colon)
+            if stripped.endswith(':') and not stripped.startswith('#'):
+                # Track this block's indentation
+                leading_whitespace = line[:len(line) - len(line.lstrip())]
+                indent_level = len(leading_whitespace)
+                
+                blocks.append({
+                    "line_number": i + 1,
+                    "content": line,
+                    "indent_level": indent_level,
+                    "children_indent": None  # Will be set by the first child line
+                })
+                
+                # If we found a method/class definition, apply specific rules
+                if re.match(r'^(def|class|async\s+def)\s+\w+', stripped):
+                    # If this is a nested definition, it must be indented relative to parent
+                    if len(blocks) > 1 and indent_level <= blocks[-2]["indent_level"]:
+                        indentation_errors.append({
+                            "line_number": i + 1,
+                            "line_content": line,
+                            "error_type": "INCORRECT_DEFINITION_INDENTATION",
+                            "message": f"Nested definition at line {i+1} has incorrect indentation",
+                            "suggestion": "Nested class/method definitions must be indented relative to their parent block"
+                        })
+            
+            # Check indentation of block contents - must be indented relative to parent
+            elif blocks:
+                leading_whitespace = line[:len(line) - len(line.lstrip())]
+                indent_level = len(leading_whitespace)
+                
+                # Get the most recent block
+                parent_block = blocks[-1]
+                
+                # If this is the first child of the block, track its indentation
+                if parent_block["children_indent"] is None:
+                    parent_block["children_indent"] = indent_level
+                    
+                    # Block children must be indented deeper than the block itself
+                    if indent_level <= parent_block["indent_level"]:
+                        indentation_errors.append({
+                            "line_number": i + 1,
+                            "line_content": line,
+                            "parent_line": parent_block["content"],
+                            "parent_line_number": parent_block["line_number"],
+                            "error_type": "INSUFFICIENT_BLOCK_INDENTATION",
+                            "message": f"Line {i+1} is not properly indented inside its parent block",
+                            "suggestion": "Code inside a block (after ':') must be indented"
+                        })
+                        
+                # All block children should have the same indentation
+                elif indent_level != parent_block["children_indent"]:
+                    # Special case: This could be a dedent to a parent block's level
+                    is_dedent_to_parent = False
+                    for prev_block in reversed(blocks[:-1]):
+                        if indent_level == prev_block["indent_level"] or indent_level == prev_block.get("children_indent", 0):
+                            is_dedent_to_parent = True
+                            break
+                            
+                    # If it's not a valid dedent, then it's an error
+                    if not is_dedent_to_parent and indent_level < parent_block["children_indent"]:
+                        indentation_errors.append({
+                            "line_number": i + 1,
+                            "line_content": line,
+                            "error_type": "INCONSISTENT_BLOCK_INDENTATION",
+                            "message": f"Line {i+1} has inconsistent indentation with previous block lines",
+                            "suggestion": "All code at the same logical level should have identical indentation"
+                        })
+                        
+        # Report all indentation errors with detailed messages
+        if indentation_errors:
+            error_msg = "CRITICAL PYTHON INDENTATION STRUCTURAL ERRORS:\n\n"
+            
+            for i, error in enumerate(indentation_errors, 1):
+                error_msg += f"ERROR #{i}: {error['error_type']} - {error['message']}\n"
+                
+                if "line_content" in error:
+                    error_msg += f"Line {error['line_number']}: {error['line_content']}\n"
+                    
+                    # Visualize the indentation
+                    leading_whitespace = error['line_content'][:len(error['line_content']) - len(error['line_content'].lstrip())]
+                    whitespace_marker = ""
+                    for char in leading_whitespace:
+                        if char == ' ':
+                            whitespace_marker += "·"  # Visualize spaces with middle dots
+                        elif char == '\t':
+                            whitespace_marker += "→"  # Visualize tabs with right arrows
+                    
+                    error_msg += f"    {whitespace_marker}{'^' * len(error['line_content'].lstrip())}\n"
+                
+                if "parent_line" in error:
+                    error_msg += f"Parent block at line {error['parent_line_number']}: {error['parent_line']}\n"
+                    
+                error_msg += f"Suggestion: {error['suggestion']}\n\n"
+            
+            error_msg += "\nPython is extremely sensitive to indentation. These errors MUST be fixed before proceeding."
+            raise ValueError(error_msg)
         
 
 
