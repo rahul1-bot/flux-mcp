@@ -370,8 +370,49 @@ class TextEditor:
         
         # Process advanced highlight options
         if isinstance(highlight, dict):
-            # Pattern-based targeting with regex
-            if "pattern" in highlight:
+            # Standardized approach using "target" key
+            if "target" in highlight:
+                target = highlight["target"]
+                
+                # Handle list of targets (multi-target replacement)
+                if isinstance(target, list):
+                    return await self._multi_target_replace(
+                        file_path, target, replace_with, encoding,
+                        checkpoint, auto_checkpoint, dry_run, result_data
+                    )
+                
+                # Single target with related files
+                if "related_files" in highlight:
+                    try:
+                        multifile_result: dict[str, Any] = await self._multi_file_replace(
+                            file_path, target, highlight["related_files"], replace_with,
+                            checkpoint, auto_checkpoint, dry_run, result_data
+                        )
+                        return multifile_result
+                    except Exception as e:
+                        result_data["errors"].append(str(e))
+                        result_data["message"] = f"ERROR: Multi-file replacement failed: {e}"
+                        return result_data
+                
+                # Single target with specific occurrence
+                if "occurrence" in highlight:
+                    try:
+                        occurrence: int = int(highlight["occurrence"])
+                        occurrence_result: dict[str, Any] = await self._occurrence_based_replace(
+                            file_path, target, occurrence, replace_with, encoding,
+                            checkpoint, auto_checkpoint, dry_run, result_data
+                        )
+                        return occurrence_result
+                    except Exception as e:
+                        result_data["errors"].append(str(e))
+                        result_data["message"] = f"ERROR: Occurrence-based targeting failed: {e}"
+                        return result_data
+                
+                # Default: treat as simple target
+                highlight = target
+                
+            # Legacy support for old patterns (to be deprecated)
+            elif "pattern" in highlight:
                 try:
                     regex_result: dict[str, Any] = await self._regex_based_replace(
                         file_path, highlight["pattern"], replace_with, encoding, 
@@ -383,7 +424,6 @@ class TextEditor:
                     result_data["message"] = f"ERROR: Regex-based targeting failed: {e}"
                     return result_data
             
-            # Line-based targeting
             elif "line_range" in highlight:
                 try:
                     line_range_result: dict[str, Any] = await self._line_based_replace(
@@ -396,7 +436,6 @@ class TextEditor:
                     result_data["message"] = f"ERROR: Line-based targeting failed: {e}"
                     return result_data
             
-            # Multi-target replacements
             elif "targets" in highlight or "multi_targets" in highlight:
                 targets: list[str] = highlight.get("targets", highlight.get("multi_targets", []))
                 try:
@@ -408,36 +447,6 @@ class TextEditor:
                 except Exception as e:
                     result_data["errors"].append(str(e))
                     result_data["message"] = f"ERROR: Multi-target replacement failed: {e}"
-                    return result_data
-                
-            # Occurrence-based targeting
-            elif "occurrence" in highlight:
-                try:
-                    target: str = highlight.get("target", "")
-                    occurrence: int = int(highlight["occurrence"])
-                    occurrence_result: dict[str, Any] = await self._occurrence_based_replace(
-                        file_path, target, occurrence, replace_with, encoding,
-                        checkpoint, auto_checkpoint, dry_run, result_data
-                    )
-                    return occurrence_result
-                except Exception as e:
-                    result_data["errors"].append(str(e))
-                    result_data["message"] = f"ERROR: Occurrence-based targeting failed: {e}"
-                    return result_data
-                    
-            # Multi-file replacement
-            elif "related_files" in highlight:
-                try:
-                    primary_target: str = highlight.get("target", "")
-                    related_files: list[str] = highlight["related_files"]
-                    multifile_result: dict[str, Any] = await self._multi_file_replace(
-                        file_path, primary_target, related_files, replace_with,
-                        checkpoint, auto_checkpoint, dry_run, result_data
-                    )
-                    return multifile_result
-                except Exception as e:
-                    result_data["errors"].append(str(e))
-                    result_data["message"] = f"ERROR: Multi-file replacement failed: {e}"
                     return result_data
             
         # Standard validation for string-based highlight
@@ -1092,10 +1101,15 @@ class TextEditor:
             result_data["message"] = f"ERROR: Line-based replacement failed: {e}"
             return result_data
             
-    async def _multi_target_replace(self, file_path: Path, targets: list[str], replace_with: str,
+    async def _multi_target_replace(self, file_path: Path, targets: list[str], replace_with: str | dict[str, str],
                                    encoding: str, checkpoint: str | None, auto_checkpoint: bool,
                                    dry_run: bool, result_data: dict[str, Any] | None = None) -> dict[str, Any]:
-        """Replace multiple targets in a single operation."""
+        """Replace multiple targets with standardized approach.
+        
+        Handles two cases:
+        1. Single replacement for all targets: replace_with is a string
+        2. Target-specific replacements: replace_with is a dictionary {target: replacement}
+        """
         if result_data is None:
             result_data = {
                 "success": False,
@@ -1139,9 +1153,18 @@ class TextEditor:
                     # Get original block
                     original_block: str = new_content[result.start_pos:result.end_pos]
                     
+                    # Get replacement for this target
+                    if isinstance(replace_with, dict):
+                        if target not in replace_with:
+                            result_data["warnings"].append(f"No replacement provided for '{target}', skipping")
+                            continue
+                        target_replacement: str = replace_with[target]
+                    else:
+                        # Use the same replacement for all targets
+                        target_replacement: str = replace_with
+                    
                     # Apply replacement
-                    replacement: str = replace_with.replace("{{target}}", target)
-                    target_result: str = parser.apply_replacement(new_content, result, replacement)
+                    target_result: str = parser.apply_replacement(new_content, result, target_replacement)
                     
                     # Update new_content for next target
                     new_content = target_result

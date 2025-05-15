@@ -88,36 +88,34 @@ class FluxServer:
                     "## How This Tool Works\n" +
                     "This tool precisely replaces code blocks by targeting classes/methods in Python files while preserving indentation.\n\n" +
                     "## CORRECT Usage Patterns\n" +
-                    "1. **highlight parameter** - MUST follow format: 'ClassName' or 'ClassName.method_name'\n" +
+                    "1. **Basic targeting** - Simple string format:\n" +
                     "   * ✅ highlight='MyClass'  - replaces entire class\n" +
                     "   * ✅ highlight='MyClass.my_method'  - replaces specific method\n" +
                     "   * ❌ highlight='class MyClass'  - WRONG: no 'class' keyword\n" +
                     "   * ❌ highlight='def my_method()'  - WRONG: no 'def' keyword or parentheses\n\n" +
-                    "   * Advanced targeting is also supported:\n" +
-                    "   * ✅ highlight={\"pattern\": r\"regex_pattern\"} - for regex-based targeting\n" +
-                    "   * ✅ highlight={\"line_range\": [1, 10]} - for line number targeting\n" +
-                    "   * ✅ highlight={\"targets\": [\"Class1\", \"Class2.method\"]} - for multi-target replacements\n" +
-                    "   * ✅ highlight={\"target\": \"MyClass\", \"occurrence\": 2} - for nth occurrence\n\n" +
-                    "2. **replace_with parameter** - MUST include complete definition line and proper indentation\n" +
-                    "   * ✅ Use triple quotes: replace_with=\"\"\"def method(self):\\n    return True\"\"\"\n" +
-                    "   * ✅ Include method/class definition line when replacing\n" +
-                    "   * ✅ Use consistent indentation (same pattern throughout code)\n" +
-                    "   * ❌ Missing definition: replace_with=\"\"\"    return True\"\"\"  - WRONG\n" +
-                    "   * ❌ Inconsistent indentation - WRONG\n\n" +
+                    "2. **Standardized advanced targeting** - Always use 'target' key:\n" +
+                    "   * ✅ highlight={\"target\": \"MyClass.method\"} - single target\n" +
+                    "   * ✅ highlight={\"target\": [\"Class1\", \"Class2.method\"]} - multiple targets\n" +
+                    "   * ✅ highlight={\"target\": \"MyClass\", \"occurrence\": 2} - 2nd occurrence\n" +
+                    "   * ✅ highlight={\"target\": \"MyClass\", \"related_files\": [\"other.py\"]} - multi-file\n\n" +
+                    "3. **replacement** - Can be string or dictionary for multiple targets:\n" +
+                    "   * ✅ replace_with=\"\"\"def method(self) -> None:\\n    return True\"\"\"\n" +
+                    "   * ✅ replace_with={\"Class1.method1\": \"\"\"def method1(self) -> None:\\n    return True\"\"\", \n" +
+                    "              \"Class2.method2\": \"\"\"def method2(self) -> None:\\n    return False\"\"\"}\n\n" +
+                    "4. **Always use triple quotes for code**:\n" +
+                    "   * ✅ replace_with=\"\"\"def method(self) -> None:\\n    return True\"\"\"\n" +
+                    "   * ❌ replace_with=\"def method(self) -> None:\\n    return True\"\n\n" +
                     "## Common Mistakes (AVOID THESE)\n" +
                     "* Targeting non-existent classes/methods (check available targets in error messages)\n" +
                     "* Mixed indentation (spaces vs tabs) in replacement code\n" +
                     "* Missing triple quotes (must use \"\"\" for proper whitespace preservation)\n" +
                     "* Incorrect escaping in replacement string (watch for \\n, \\t characters)\n" +
-                    "* Not including complete definition line in replacement\n" +
-                    "* Targeting a method but providing class-level replacement code\n\n" +
+                    "* Not including complete definition line in replacement\n\n" +
                     "## Error Recovery\n" +
                     "If replacement fails, the tool will attempt to recover by:\n" +
                     "* Using fuzzy matching for targets\n" +
                     "* Suggesting similar targets when exact matches fail\n" +
-                    "* Providing detailed error messages and contextual information\n\n" +
-                    "## Diff Preview Mode\n" +
-                    "Use dry_run=True to preview changes without applying them.",
+                    "* Providing detailed error messages and contextual information",
                     inputSchema={
                         "type": "object",
                         "properties": {
