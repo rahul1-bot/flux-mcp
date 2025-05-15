@@ -34,22 +34,210 @@ class TextEditor:
         self.memory_manager: MemoryManager = memory_manager
         
     def _validate_python_syntax(self, code: str) -> tuple[bool, str]:
-        """Validate Python code syntax using AST parsing.
+        """Rigorous Python code syntax validation with AST parsing.
+        
+        Performs comprehensive syntax checking including:
+        - AST parsing to catch any syntax errors
+        - Feature detection for Python version compatibility
+        - Common code smells and potential issues
         
         Args:
             code: Python code to validate
             
         Returns:
-            Tuple of (is_valid, error_message)
+            Tuple of (is_valid, detailed_error_message)
         """
+        # Basic syntax validation
         try:
             import ast
-            ast.parse(code)
-            return True, ""
+            ast_tree = ast.parse(code)
         except SyntaxError as e:
-            line_content: str = code.splitlines()[e.lineno-1] if e.lineno <= len(code.splitlines()) else ""
-            pointer: str = " " * max(0, e.offset-1) + "^" if e.offset else ""
-            return False, f"Line {e.lineno}, Col {e.offset}: {e.msg}\n{line_content}\n{pointer}"
+            # Enhanced error reporting with exact location and visualization
+            line_content: str = ""
+            pointer: str = ""
+            if e.lineno <= len(code.splitlines()):
+                line_content = code.splitlines()[e.lineno-1]
+                if e.offset:
+                    pointer = " " * max(0, e.offset-1) + "^" * min(5, len(line_content) - e.offset + 1)
+            
+            detailed_error = (
+                f"CRITICAL SYNTAX ERROR: {e.msg}\n"
+                f"Line {e.lineno}, Column {e.offset}:\n"
+                f"{line_content}\n"
+                f"{pointer}\n\n"
+                f"This code contains invalid Python syntax and would fail to execute."
+            )
+            return False, detailed_error
+        except Exception as e:
+            return False, f"CRITICAL PARSING ERROR: {str(e)}"
+        
+        # Advanced feature detection for version compatibility
+        compatibility_issues: list[dict[str, Any]] = []
+        
+        try:
+            import sys
+            import re
+            import builtins
+            import platform
+            
+            # Detect current Python version
+            current_python_version = tuple(map(int, platform.python_version_tuple()))
+            
+            # Feature compatibility checks
+            incompatible_features = []
+            
+            # 1. Check for f-strings (Python 3.6+)
+            if re.search(r'f[\'"]', code):
+                if current_python_version < (3, 6):
+                    incompatible_features.append({
+                        "feature": "f-strings", 
+                        "min_version": "3.6",
+                        "line_numbers": [i+1 for i, line in enumerate(code.splitlines()) if re.search(r'f[\'"]', line)]
+                    })
+            
+            # 2. Check for walrus operator := (Python 3.8+)
+            if re.search(r':=', code):
+                if current_python_version < (3, 8):
+                    incompatible_features.append({
+                        "feature": "assignment expressions (walrus operator :=)", 
+                        "min_version": "3.8",
+                        "line_numbers": [i+1 for i, line in enumerate(code.splitlines()) if ":=" in line]
+                    })
+                    
+            # 3. Check for match/case syntax (Python 3.10+)
+            if re.search(r'\bmatch\b.*?:', code) and re.search(r'\bcase\b.*?:', code):
+                if current_python_version < (3, 10):
+                    incompatible_features.append({
+                        "feature": "match/case pattern matching", 
+                        "min_version": "3.10",
+                        "line_numbers": [i+1 for i, line in enumerate(code.splitlines()) 
+                                       if re.search(r'\bmatch\b.*?:', line) or re.search(r'\bcase\b.*?:', line)]
+                    })
+            
+            # 4. Check for union operator | in type hints (Python 3.10+)
+            if re.search(r':\s*\w+\s*\|\s*\w+', code):
+                if current_python_version < (3, 10):
+                    incompatible_features.append({
+                        "feature": "union type operator |", 
+                        "min_version": "3.10",
+                        "line_numbers": [i+1 for i, line in enumerate(code.splitlines()) 
+                                       if re.search(r':\s*\w+\s*\|\s*\w+', line)]
+                    })
+                    
+            # 5. Check for positional-only parameters (Python 3.8+)
+            if re.search(r'\([^)]*/, ', code):
+                if current_python_version < (3, 8):
+                    incompatible_features.append({
+                        "feature": "positional-only parameters", 
+                        "min_version": "3.8",
+                        "line_numbers": [i+1 for i, line in enumerate(code.splitlines()) if re.search(r'\([^)]*/, ', line)]
+                    })
+                    
+            # Format incompatibility report
+            if incompatible_features:
+                error_msg = "PYTHON VERSION COMPATIBILITY ISSUES:\n\n"
+                for i, feature in enumerate(incompatible_features, 1):
+                    error_msg += (f"{i}. The code uses {feature['feature']} which requires Python {feature['min_version']}+\n"
+                                f"   Found at line(s): {', '.join(map(str, feature['line_numbers']))}\n\n")
+                error_msg += f"Current Python version: {'.'.join(map(str, current_python_version))}\n\n"
+                error_msg += "These features may cause runtime errors if run on older Python versions."
+                compatibility_issues.append({"message": error_msg, "is_critical": False})
+        
+        except Exception as e:
+            # Non-critical - version compatibility check failed but syntax is still valid
+            compatibility_issues.append({
+                "message": f"Failed to check Python version compatibility: {str(e)}",
+                "is_critical": False
+            })
+            
+        # Advanced code quality checks
+        try:
+            # AST-based static analysis
+            code_issues: list[dict[str, Any]] = []
+            
+            # Track variable definitions and usage for basic type checking
+            defined_vars: dict[str, list[ast.AST]] = {}
+            
+            # Analyze the AST
+            for node in ast.walk(ast_tree):
+                # Check for undefined variables
+                if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Load):
+                    var_name = node.id
+                    # Skip builtins and common imports
+                    if (var_name not in dir(builtins) and var_name not in ('self', 'cls', 'super')
+                            and var_name not in defined_vars):
+                        # This is a potential undefined variable
+                        code_issues.append({
+                            "type": "UNDEFINED_VARIABLE",
+                            "message": f"Potential undefined variable: '{var_name}'",
+                            "node": node,
+                            "is_critical": False
+                        })
+                
+                # Track variable definitions
+                elif isinstance(node, ast.Name) and isinstance(node.ctx, ast.Store):
+                    var_name = node.id
+                    if var_name not in defined_vars:
+                        defined_vars[var_name] = []
+                    defined_vars[var_name].append(node)
+                    
+                # Check for common critical issues
+                elif isinstance(node, ast.Call) and isinstance(node.func, ast.Name):
+                    func_name = node.func.id
+                    
+                    # Check for dangerous functions
+                    if func_name in ('eval', 'exec'):
+                        code_issues.append({
+                            "type": "DANGEROUS_FUNCTION",
+                            "message": f"Potential security risk: usage of '{func_name}' function",
+                            "node": node,
+                            "is_critical": True
+                        })
+                
+                # Check for unused imports (simplified)
+                elif isinstance(node, ast.Import) or isinstance(node, ast.ImportFrom):
+                    # This is just a simple check - a full implementation would track usage
+                    if isinstance(node, ast.Import):
+                        for name in node.names:
+                            imported_name = name.asname or name.name
+                            # Add to defined vars to track usage
+                            if imported_name not in defined_vars:
+                                defined_vars[imported_name] = []
+                            defined_vars[imported_name].append(node)
+                    
+            # Format code issues
+            critical_issues = [issue for issue in code_issues if issue["is_critical"]]
+            warning_issues = [issue for issue in code_issues if not issue["is_critical"]]
+            
+            if critical_issues:
+                error_msg = "CRITICAL CODE QUALITY ISSUES:\n\n"
+                for i, issue in enumerate(critical_issues, 1):
+                    lineno = getattr(issue["node"], "lineno", "unknown")
+                    col_offset = getattr(issue["node"], "col_offset", "unknown")
+                    error_msg += f"{i}. {issue['type']}: {issue['message']} at line {lineno}, col {col_offset}\n"
+                return False, error_msg
+                
+            # Non-critical issues are just warnings
+            if warning_issues:
+                warning_msg = "CODE QUALITY WARNINGS (not preventing execution):\n\n"
+                for i, issue in enumerate(warning_issues, 1):
+                    lineno = getattr(issue["node"], "lineno", "unknown")
+                    warning_msg += f"{i}. {issue['message']} at line {lineno}\n"
+                compatibility_issues.append({"message": warning_msg, "is_critical": False})
+                
+        except Exception as e:
+            # Non-critical - static analysis failed but syntax is still valid
+            compatibility_issues.append({
+                "message": f"Code quality analysis error: {str(e)}",
+                "is_critical": False
+            })
+            
+        # If we have non-critical issues, return a warning, otherwise return success
+        if compatibility_issues:
+            warnings_text = "\n\n".join(issue["message"] for issue in compatibility_issues)
+            return True, f"VALID SYNTAX WITH WARNINGS:\n\n{warnings_text}"
+            
+        return True, ""
             
     def _calculate_similarity(self, str1: str, str2: str) -> float:
         """Calculate similarity between two strings using Levenshtein distance."""
@@ -608,16 +796,80 @@ class TextEditor:
                     content, original_block, replace_with, result_data
                 )
             
+            # Perform advanced type compatibility checks for Python files
+            if file_path.suffix.lower() == '.py':
+                type_issues = await self._check_type_compatibility(original_block, replace_with)
+                
+                # Filter critical vs. warning issues
+                critical_type_issues = [issue for issue in type_issues if issue.get("is_critical", False)]
+                warning_type_issues = [issue for issue in type_issues if not issue.get("is_critical", False)]
+                
+                # If we have critical type issues, abort the replacement
+                if critical_type_issues:
+                    error_msg: str = "CRITICAL TYPE COMPATIBILITY ERRORS:\n\n"
+                    for i, issue in enumerate(critical_type_issues, 1):
+                        error_msg += f"{i}. {issue['type']}: {issue['message']}\n"
+                    
+                    error_msg += "\nThese type changes would break compatibility with existing code.\n"
+                    error_msg += "No changes have been applied to your code."
+                    
+                    result_data["errors"].append(error_msg)
+                    result_data["message"] = error_msg
+                    result_data["type_compatibility_errors"] = critical_type_issues
+                    
+                    await self.transaction_manager.rollback(transaction_id)
+                    return result_data
+                
+                # Add warnings for non-critical issues
+                if warning_type_issues:
+                    warning_msg: str = "TYPE COMPATIBILITY WARNINGS:\n\n"
+                    for i, issue in enumerate(warning_type_issues, 1):
+                        warning_msg += f"{i}. {issue['message']}\n"
+                    
+                    result_data["warnings"].append(warning_msg)
+                
             # Pre-validate replacement text syntax if it's a Python file
             if file_path.suffix.lower() == '.py':
                 is_valid: bool
-                error_msg: str
-                is_valid, error_msg = self._validate_python_syntax(replace_with)
+                validation_msg: str
+                is_valid, validation_msg = self._validate_python_syntax(replace_with)
+                
                 if not is_valid:
-                    result_data["errors"].append(error_msg)
-                    result_data["message"] = f"SYNTAX ERROR: {error_msg}\nNo changes applied."
+                    # Critical syntax error - halt immediately
+                    result_data["errors"].append(validation_msg)
+                    result_data["message"] = (
+                        "CRITICAL SYNTAX ERROR DETECTED\n\n"
+                        f"{validation_msg}\n\n"
+                        "The replacement code contains invalid Python syntax and would break your codebase.\n"
+                        "No changes have been applied."
+                    )
                     await self.transaction_manager.rollback(transaction_id)
                     return result_data
+                elif validation_msg:
+                    # Valid syntax but with warnings
+                    result_data["warnings"].append(validation_msg)
+                    
+                    # Check if these are just warnings or include critical issues
+                    if "CRITICAL" in validation_msg:
+                        # Use a distinctive message for serious warnings
+                        confirmation_msg = (
+                            "⚠️ CODE VALIDATION WARNINGS DETECTED ⚠️\n\n"
+                            f"{validation_msg}\n\n"
+                            "These warnings do not prevent the code from executing, but may indicate potential issues.\n"
+                            "Please review them carefully before proceeding.\n\n"
+                            "Would you like to proceed with the replacement anyway? (Try with dry_run=True first to preview changes)"
+                        )
+                        result_data["requires_confirmation"] = True
+                        result_data["confirmation_message"] = confirmation_msg
+                        
+                        # If this is not a dry run, we should proceed with caution
+                        if not dry_run:
+                            # For this implementation, we'll still proceed but with prominent warnings
+                            # In a real interactive system, we might pause for confirmation
+                            result_data["warnings"].append(
+                                "Proceeding with replacement despite validation warnings. Proceed with caution!"
+                            )
+                    # If there are only minor warnings, we just include them but proceed normally
 
             # CRITICAL: Enhanced indentation validation with strict rules
             if len(replace_with.splitlines()) > 1:
@@ -678,7 +930,7 @@ class TextEditor:
                                 "line_number": idx + 1,
                                 "line_content": line,
                                 "error_type": "INCONSISTENT_CHAR",
-                                "message": f"Line {idx + 1} uses {' ' if '\t' in leading_whitespace else 'tabs'} while the rest of the code uses {base_indent_char}",
+                                "message": f"Line {idx + 1} uses indentation that doesn't match the rest of the code",
                                 "critical": True,
                                 "suggestion": f"Use consistent {base_indent_char} throughout the entire code block"
                             }
@@ -1396,52 +1648,294 @@ class TextEditor:
             
         return result_data
         
-    async def _process_imports(self, content: str, original_block: str, 
-                              replace_with: str, result_data: dict[str, Any]) -> str:
-        """Process imports in Python code replacement."""
+    async def _check_type_compatibility(self, original_code: str, replacement_code: str) -> list[dict[str, Any]]:
+        """
+        Analyze type compatibility between original and replacement code.
+        
+        Performs static analysis to detect potential type-related issues when replacing code:
+        - Method signature changes (parameter types, return types)
+        - Type annotation changes that could break compatibility
+        - Missing/changed annotations that could affect static type checking
+        
+        Args:
+            original_code: The original code block being replaced
+            replacement_code: The new code block
+            
+        Returns:
+            List of type compatibility issues found
+        """
+        type_issues: list[dict[str, Any]] = []
+        
         try:
+            import ast
             import re
             
-            # Extract imports from the original and new code
-            original_imports: list[str] = re.findall(r'^\s*(?:from|import)\s+[\w\.*]+(?: as \w+)?(?:,\s*[\w\.*]+(?: as \w+)?)*$', 
-                                                    original_block, re.MULTILINE)
-            replacement_imports: list[str] = re.findall(r'^\s*(?:from|import)\s+[\w\.*]+(?: as \w+)?(?:,\s*[\w\.*]+(?: as \w+)?)*$', 
-                                                       replace_with, re.MULTILINE)
-            
-            # Analyze missing and unused imports
-            original_import_set: set[str] = set(i.strip() for i in original_imports)
-            replacement_import_set: set[str] = set(i.strip() for i in replacement_imports)
-            
-            # Find unused imports (in original but not in replacement)
-            unused_imports: set[str] = original_import_set - replacement_import_set
-            if unused_imports:
-                result_data["warnings"].append(f"Unused imports: {', '.join(unused_imports)}")
-            
-            # Find new imports (in replacement but not in original)
-            new_imports: set[str] = replacement_import_set - original_import_set
-            if new_imports:
-                result_data["warnings"].append(f"New imports: {', '.join(new_imports)}")
+            # Parse both code blocks
+            try:
+                original_ast = ast.parse(original_code)
+                replacement_ast = ast.parse(replacement_code)
+            except SyntaxError:
+                # If syntax parsing fails, we'll already catch this in _validate_python_syntax
+                return []
                 
-                # Get the file's existing imports
-                file_imports: list[str] = re.findall(r'^\s*(?:from|import)\s+[\w\.*]+(?: as \w+)?(?:,\s*[\w\.*]+(?: as \w+)?)*$', 
-                                                    content, re.MULTILINE)
-                file_import_set: set[str] = set(i.strip() for i in file_imports)
+            # Extract function definitions from both
+            original_funcs: dict[str, dict[str, Any]] = {}
+            replacement_funcs: dict[str, dict[str, Any]] = {}
+            
+            # Helper function to extract type annotations from a function
+            def extract_function_types(node: ast.FunctionDef) -> dict[str, Any]:
+                function_types = {
+                    "name": node.name,
+                    "return_type": None,
+                    "parameters": {},
+                    "has_annotations": False
+                }
                 
-                # Check if the new imports are already in the file
-                already_present: set[str] = new_imports.intersection(file_import_set)
-                if already_present:
-                    result_data["warnings"].append(f"Imports already in file: {', '.join(already_present)}")
+                # Extract return type annotation
+                if hasattr(node, 'returns') and node.returns:
+                    function_types["has_annotations"] = True
+                    if isinstance(node.returns, ast.Name):
+                        function_types["return_type"] = node.returns.id
+                    elif isinstance(node.returns, ast.Constant):
+                        function_types["return_type"] = str(node.returns.value)
+                    elif isinstance(node.returns, ast.Subscript):
+                        # Handle complex types like List[int]
+                        function_types["return_type"] = ast.unparse(node.returns) if hasattr(ast, 'unparse') else "complex_type"
+                    else:
+                        # For other types of return annotations
+                        function_types["return_type"] = "complex_type"
                 
-                # Check for missing imports that need to be added to the file
-                missing_imports: set[str] = new_imports - file_import_set
-                if missing_imports:
-                    result_data["warnings"].append(f"Imports to be added: {', '.join(missing_imports)}")
+                # Extract parameter types
+                for arg in node.args.args:
+                    if hasattr(arg, 'annotation') and arg.annotation:
+                        function_types["has_annotations"] = True
+                        if isinstance(arg.annotation, ast.Name):
+                            function_types["parameters"][arg.arg] = arg.annotation.id
+                        elif isinstance(arg.annotation, ast.Constant):
+                            function_types["parameters"][arg.arg] = str(arg.annotation.value)
+                        elif isinstance(arg.annotation, ast.Subscript):
+                            # Handle complex types
+                            function_types["parameters"][arg.arg] = ast.unparse(arg.annotation) if hasattr(ast, 'unparse') else "complex_type"
+                        else:
+                            function_types["parameters"][arg.arg] = "complex_type"
+                    else:
+                        function_types["parameters"][arg.arg] = None
+                        
+                return function_types
+            
+            # Extract functions from original code
+            for node in ast.walk(original_ast):
+                if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                    original_funcs[node.name] = extract_function_types(node)
+            
+            # Extract functions from replacement code
+            for node in ast.walk(replacement_ast):
+                if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                    replacement_funcs[node.name] = extract_function_types(node)
+            
+            # Compare functions for type compatibility
+            for func_name, orig_func in original_funcs.items():
+                if func_name in replacement_funcs:
+                    new_func = replacement_funcs[func_name]
                     
-                    # TODO: Add logic to insert missing imports at the top of the file
-                    # This would modify the content outside the target block
+                    # Check return type compatibility
+                    if orig_func["return_type"] != new_func["return_type"]:
+                        if orig_func["return_type"] is not None and new_func["return_type"] is not None:
+                            type_issues.append({
+                                "type": "RETURN_TYPE_CHANGE",
+                                "message": (f"Return type changed for function '{func_name}': "
+                                           f"from '{orig_func['return_type']}' to '{new_func['return_type']}'"),
+                                "function": func_name,
+                                "is_critical": True
+                            })
+                        elif orig_func["return_type"] is None and new_func["return_type"] is not None:
+                            type_issues.append({
+                                "type": "RETURN_TYPE_ADDED",
+                                "message": (f"Return type annotation added to function '{func_name}': "
+                                           f"'{new_func['return_type']}'"),
+                                "function": func_name,
+                                "is_critical": False
+                            })
+                        elif orig_func["return_type"] is not None and new_func["return_type"] is None:
+                            type_issues.append({
+                                "type": "RETURN_TYPE_REMOVED",
+                                "message": (f"Return type annotation removed from function '{func_name}': "
+                                           f"was '{orig_func['return_type']}'"),
+                                "function": func_name,
+                                "is_critical": True
+                            })
+                    
+                    # Check parameter type compatibility
+                    orig_params = set(orig_func["parameters"].keys())
+                    new_params = set(new_func["parameters"].keys())
+                    
+                    # Parameters removed
+                    for param in orig_params - new_params:
+                        if param not in ('self', 'cls'):  # Ignore self/cls parameters
+                            type_issues.append({
+                                "type": "PARAMETER_REMOVED",
+                                "message": f"Parameter '{param}' removed from function '{func_name}'",
+                                "function": func_name,
+                                "parameter": param,
+                                "is_critical": True
+                            })
+                    
+                    # Parameters added
+                    for param in new_params - orig_params:
+                        if param not in ('self', 'cls'):  # Ignore self/cls parameters
+                            # Check if it has a default value (more complex to detect)
+                            # For simplicity, we'll assume it doesn't and mark it as critical
+                            type_issues.append({
+                                "type": "PARAMETER_ADDED",
+                                "message": f"New parameter '{param}' added to function '{func_name}'",
+                                "function": func_name,
+                                "parameter": param,
+                                "is_critical": True
+                            })
+                    
+                    # Parameter types changed
+                    for param in orig_params.intersection(new_params):
+                        orig_type = orig_func["parameters"][param]
+                        new_type = new_func["parameters"][param]
+                        
+                        if orig_type != new_type:
+                            if orig_type is not None and new_type is not None:
+                                type_issues.append({
+                                    "type": "PARAMETER_TYPE_CHANGE",
+                                    "message": (f"Type annotation for parameter '{param}' in function '{func_name}' changed: "
+                                               f"from '{orig_type}' to '{new_type}'"),
+                                    "function": func_name,
+                                    "parameter": param,
+                                    "is_critical": True
+                                })
+                            elif orig_type is None and new_type is not None:
+                                type_issues.append({
+                                    "type": "PARAMETER_TYPE_ADDED",
+                                    "message": (f"Type annotation added to parameter '{param}' in function '{func_name}': "
+                                               f"'{new_type}'"),
+                                    "function": func_name,
+                                    "parameter": param,
+                                    "is_critical": False
+                                })
+                            elif orig_type is not None and new_type is None:
+                                type_issues.append({
+                                    "type": "PARAMETER_TYPE_REMOVED",
+                                    "message": (f"Type annotation removed from parameter '{param}' in function '{func_name}': "
+                                               f"was '{orig_type}'"),
+                                    "function": func_name,
+                                    "parameter": param,
+                                    "is_critical": True
+                                })
+            
+            # Check for class type annotation changes
+            original_classes: dict[str, dict[str, Any]] = {}
+            replacement_classes: dict[str, dict[str, Any]] = {}
+            
+            # Extract classes and their type information
+            def extract_class_types(node: ast.ClassDef) -> dict[str, Any]:
+                class_types = {
+                    "name": node.name,
+                    "bases": [],
+                    "has_type_annotations": False,
+                    "attributes": {}
+                }
                 
-            return replace_with
+                # Extract base classes
+                for base in node.bases:
+                    if isinstance(base, ast.Name):
+                        class_types["bases"].append(base.id)
+                    elif hasattr(ast, 'unparse'):
+                        class_types["bases"].append(ast.unparse(base))
+                    else:
+                        class_types["bases"].append("complex_base")
+                
+                # Extract typed class attributes
+                for node_item in node.body:
+                    if isinstance(node_item, ast.AnnAssign) and isinstance(node_item.target, ast.Name):
+                        class_types["has_type_annotations"] = True
+                        if isinstance(node_item.annotation, ast.Name):
+                            class_types["attributes"][node_item.target.id] = node_item.annotation.id
+                        elif hasattr(ast, 'unparse'):
+                            class_types["attributes"][node_item.target.id] = ast.unparse(node_item.annotation)
+                        else:
+                            class_types["attributes"][node_item.target.id] = "complex_type"
+                            
+                return class_types
+            
+            # Extract classes from original code
+            for node in ast.walk(original_ast):
+                if isinstance(node, ast.ClassDef):
+                    original_classes[node.name] = extract_class_types(node)
+            
+            # Extract classes from replacement code
+            for node in ast.walk(replacement_ast):
+                if isinstance(node, ast.ClassDef):
+                    replacement_classes[node.name] = extract_class_types(node)
+            
+            # Compare classes for type compatibility
+            for class_name, orig_class in original_classes.items():
+                if class_name in replacement_classes:
+                    new_class = replacement_classes[class_name]
+                    
+                    # Check class inheritance compatibility
+                    orig_bases = set(orig_class["bases"])
+                    new_bases = set(new_class["bases"])
+                    
+                    # Bases removed
+                    for base in orig_bases - new_bases:
+                        type_issues.append({
+                            "type": "BASE_CLASS_REMOVED",
+                            "message": f"Base class '{base}' removed from class '{class_name}'",
+                            "class": class_name,
+                            "base_class": base,
+                            "is_critical": True
+                        })
+                    
+                    # Bases added
+                    for base in new_bases - orig_bases:
+                        type_issues.append({
+                            "type": "BASE_CLASS_ADDED",
+                            "message": f"New base class '{base}' added to class '{class_name}'",
+                            "class": class_name,
+                            "base_class": base,
+                            "is_critical": False
+                        })
+                    
+                    # Check attribute type compatibility
+                    orig_attrs = set(orig_class["attributes"].keys())
+                    new_attrs = set(new_class["attributes"].keys())
+                    
+                    # Typed attributes removed
+                    for attr in orig_attrs - new_attrs:
+                        type_issues.append({
+                            "type": "TYPED_ATTRIBUTE_REMOVED",
+                            "message": f"Typed attribute '{attr}' removed from class '{class_name}'",
+                            "class": class_name,
+                            "attribute": attr,
+                            "is_critical": True
+                        })
+                    
+                    # Attribute types changed
+                    for attr in orig_attrs.intersection(new_attrs):
+                        orig_type = orig_class["attributes"][attr]
+                        new_type = new_class["attributes"][attr]
+                        
+                        if orig_type != new_type:
+                            type_issues.append({
+                                "type": "ATTRIBUTE_TYPE_CHANGE",
+                                "message": (f"Type annotation for attribute '{attr}' in class '{class_name}' changed: "
+                                           f"from '{orig_type}' to '{new_type}'"),
+                                "class": class_name,
+                                "attribute": attr,
+                                "is_critical": True
+                            })
             
         except Exception as e:
-            result_data["warnings"].append(f"Import processing error: {e}")
-            return replace_with
+            # If type checking fails, log the error but don't block the replacement
+            type_issues.append({
+                "type": "TYPE_CHECK_ERROR",
+                "message": f"Failed to perform type compatibility check: {str(e)}",
+                "is_critical": False
+            })
+            
+        return type_issues
