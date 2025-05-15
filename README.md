@@ -1,4 +1,4 @@
-# FLUX - High-Performance Text Manipulation Engine for Apple Silicon
+# FLUX : High-Performance Text Manipulation Engine for Apple Silicon
 
 <p align="center">
   <img src="https://img.shields.io/badge/Platform-Apple%20Silicon-black?style=for-the-badge&logo=apple" />
@@ -172,27 +172,27 @@ with flux.transaction("thesis.tex") as tx:
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│                         FLUX MCP Server                      │
+│                         FLUX MCP Server                     │
 ├─────────────────────────────────────────────────────────────┤
 │                                                             │
-│  ┌─────────────┐  ┌──────────────┐  ┌──────────────────┐   │
-│  │   MCP API   │  │   FluxEngine │  │ Thread Pool Mgr  │   │
-│  └──────┬──────┘  └──────┬───────┘  └────────┬─────────┘   │
-│         │                │                    │             │
-│  ┌──────▼──────────────────────────────────────────────┐    │
-│  │              Transaction Manager                    │    │
-│  │  • Atomic Operations  • File Locking               │    │
-│  │  • Rollback Support   • State Management           │    │
-│  └────────────────────────┬───────────────────────────┘    │
-│                          │                                  │
-│  ┌───────────┬───────────┼───────────┬────────────────┐    │
+│  ┌─────────────┐  ┌──────────────┐  ┌──────────────────┐    │
+│  │   MCP API   │  │   FluxEngine │  │ Thread Pool Mgr  │    │
+│  └──────┬──────┘  └──────┬───────┘  └────────┬─────────┘    │
+│         │                │                   │              │
+│  ┌──────-─────────────────────────────────────────────┐     │
+│  │              Transaction Manager                   │     │
+│  │  • Atomic Operations  • File Locking               │     │
+│  │  • Rollback Support   • State Management           │     │
+│  └────────────────────────┬───────────────────────────┘     │
+│                           │                                 │
+│  ┌───────────┬───────────-┼────────--──┬───────────────┐    │
 │  │   File    │   Memory   │   Search   │   Version     │    │
 │  │  Handler  │  Manager   │   Engine   │   Control     │    │
-│  ├───────────┼───────────┼───────────┼────────────────┤    │
-│  │ • Read    │ • mmap    │ • GPU     │ • Checkpoints  │    │
-│  │ • Write   │ • Cache   │ • Index   │ • Undo/Redo   │    │
-│  │ • Lock    │ • Chunk   │ • Fuzzy   │ • Diff        │    │
-│  └───────────┴───────────┴───────────┴────────────────┘    │
+│  ├───────────┼──────────-─┼───────────-┼───────────────┤    │
+│  │ • Read    │ • mmap     │ • GPU      │ • Checkpoints │    │
+│  │ • Write   │ • Cache    │ • Index    │ • Undo/Redo   │    │
+│  │ • Lock    │ • Chunk    │ • Fuzzy    │ • Diff        │    │
+│  └───────────┴───────────-┴──────────--┴───────────────┘    │
 │                                                             │
 │  ┌─────────────────────────────────────────────────────┐    │
 │  │                   Metal Accelerator                 │    │
@@ -278,18 +278,18 @@ GPU Dispatch (Metal)
 
 ```
 ┌─────────────────────────────────────────┐
-│          Unified Memory (128GB)          │
+│          Unified Memory (128GB)         │
 ├─────────────────────────────────────────┤
 │                                         │
-│  ┌─────────────┐  ┌─────────────────┐  │
-│  │  Memory Map │  │   Cache Layer   │  │
-│  │  (mmap)     │  │   (1GB LRU)     │  │
-│  └─────────────┘  └─────────────────┘  │
+│  ┌─────────────┐  ┌─────────────────┐   │
+│  │  Memory Map │  │   Cache Layer   │   │
+│  │  (mmap)     │  │   (1GB LRU)     │   │
+│  └─────────────┘  └─────────────────┘   │
 │                                         │
-│  ┌─────────────┐  ┌─────────────────┐  │
-│  │  GPU Memory │  │  Thread Local   │  │
-│  │  (Metal)    │  │    Storage      │  │
-│  └─────────────┘  └─────────────────┘  │
+│  ┌─────────────┐  ┌─────────────────┐   │
+│  │  GPU Memory │  │  Thread Local   │   │
+│  │  (Metal)    │  │    Storage      │   │
+│  └─────────────┘  └─────────────────┘   │
 │                                         │
 └─────────────────────────────────────────┘
 ```
@@ -1013,24 +1013,13 @@ SOFTWARE.
 
 ---
 
-## Acknowledgments
-
-Built with ❤️ by Rahul and Lyra.
-
-Special thanks to:
-- Claude Desktop team for the MCP protocol
-- Apple Silicon team for the incredible M3 Max
-- The open source community
-
----
 
 ## Contact
 
-- **Email**: rahul@flux-mcp.dev
-- **Discord**: [FLUX Community](https://discord.gg/flux-mcp)
-- **Twitter**: [@flux_mcp](https://twitter.com/flux_mcp)
-- **Website**: [flux-mcp.dev](https://flux-mcp.dev)
-
+- **Email**: rahul.sawhney@fau.de, sawhney.rahulofficial@outlook.com
+- **Degree**: Master's in Data Science
+- **University**: Friedrich-Alexander-Universität Erlangen-Nürnberg
+- 
 ---
 
 <p align="center">
