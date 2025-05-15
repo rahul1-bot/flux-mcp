@@ -394,20 +394,6 @@ class TextEditor:
                         result_data["message"] = f"ERROR: Multi-file replacement failed: {e}"
                         return result_data
                 
-                # Single target with specific occurrence
-                if "occurrence" in highlight:
-                    try:
-                        occurrence: int = int(highlight["occurrence"])
-                        occurrence_result: dict[str, Any] = await self._occurrence_based_replace(
-                            file_path, target, occurrence, replace_with, encoding,
-                            checkpoint, auto_checkpoint, dry_run, result_data
-                        )
-                        return occurrence_result
-                    except Exception as e:
-                        result_data["errors"].append(str(e))
-                        result_data["message"] = f"ERROR: Occurrence-based targeting failed: {e}"
-                        return result_data
-                
                 # Default: treat as simple target
                 highlight = target
                 
@@ -1234,107 +1220,9 @@ class TextEditor:
             result_data["message"] = f"ERROR: Multi-target replacement failed: {e}"
             return result_data
             
-    async def _occurrence_based_replace(self, file_path: Path, target: str, occurrence: int,
-                                       replace_with: str, encoding: str, checkpoint: str | None,
-                                       auto_checkpoint: bool, dry_run: bool,
-                                       result_data: dict[str, Any] | None = None) -> dict[str, Any]:
-        """Replace a specific occurrence of the target."""
-        if result_data is None:
-            result_data = {
-                "success": False,
-                "message": "",
-                "warnings": [],
-                "errors": [],
-                "modified_files": [str(file_path)]
-            }
-            
-        content: str = await self._read_file_content(file_path)
-        
-        # Validate occurrence parameter
-        if occurrence < 1:
-            result_data["errors"].append(f"Invalid occurrence: {occurrence}, must be >= 1")
-            result_data["message"] = f"ERROR: Invalid occurrence: {occurrence}, must be >= 1"
-            return result_data
-            
-        # Start transaction
-        transaction_id: str = await self.transaction_manager.begin()
-        
-        try:
-            # Acquire lock
-            await self.transaction_manager.acquire_file_lock(transaction_id, file_path)
-            
-            # Create checkpoint if needed
-            if (checkpoint or auto_checkpoint) and not dry_run:
-                checkpoint_name: str = checkpoint or f"occurrence_replace_{file_path.name}_{transaction_id[:8]}"
-                try:
-                    await self.transaction_manager.create_checkpoint(transaction_id, file_path, checkpoint_name)
-                except Exception as e:
-                    result_data["warnings"].append(f"Failed to create checkpoint: {e}")
-            
-            # Find all occurrences of the target
-            import re
-            pattern: str = re.escape(target)
-            matches: list[re.Match] = list(re.finditer(pattern, content))
-            
-            if not matches:
-                result_data["errors"].append(f"Target not found: {target}")
-                result_data["message"] = f"ERROR: Target '{target}' not found in file"
-                await self.transaction_manager.rollback(transaction_id)
-                return result_data
-                
-            if occurrence > len(matches):
-                result_data["errors"].append(f"Occurrence {occurrence} is out of range (max: {len(matches)})")
-                result_data["message"] = f"ERROR: Occurrence {occurrence} is out of range (max: {len(matches)})"
-                await self.transaction_manager.rollback(transaction_id)
-                return result_data
-                
-            # Get the specific match
-            match: re.Match = matches[occurrence - 1]
-            
-            # Apply replacement
-            new_content: str = content[:match.start()] + replace_with + content[match.end():]
-            
-            # Generate diff
-            import difflib
-            diff: list[str] = list(difflib.unified_diff(
-                content.splitlines(),
-                new_content.splitlines(),
-                fromfile=f"{file_path} (original)",
-                tofile=f"{file_path} (modified)",
-                lineterm="",
-                n=3
-            ))
-            
-            result_data["diff_output"] = "\n".join(diff) if diff else "No changes"
-            
-            if not diff:
-                result_data["message"] = "No changes needed - replacement produces identical content"
-                await self.transaction_manager.rollback(transaction_id)
-                return result_data
-                
-            # Check if this is dry run
-            if dry_run:
-                result_data["message"] = f"DRY RUN: Replace occurrence {occurrence} of '{target}'"
-                await self.transaction_manager.rollback(transaction_id)
-                return result_data
-                
-            # Write changes
-            await self.transaction_manager.write_to_temp(
-                transaction_id, file_path, new_content.encode(encoding)
-            )
-            await self.transaction_manager.commit(transaction_id)
-            
-            result_data["success"] = True
-            result_data["new_content"] = new_content
-            result_data["message"] = f"✓ Successfully replaced occurrence {occurrence} of '{target}' in {file_path}"
-            
-            return result_data
-            
-        except Exception as e:
-            await self.transaction_manager.rollback(transaction_id)
-            result_data["errors"].append(str(e))
-            result_data["message"] = f"ERROR: Occurrence-based replacement failed: {e}"
-            return result_data
+    # The _occurrence_based_replace method was removed as it was unnecessary.
+    # For targeting specific occurrences of a class or method, use the standard
+    # qualified name approach: "Class1.method" instead of occurrence-based targeting.
             
     async def _multi_file_replace(self, file_path: Path, primary_target: str, related_files: list[str],
                                  replace_with: str, checkpoint: str | None, auto_checkpoint: bool,

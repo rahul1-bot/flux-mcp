@@ -96,7 +96,6 @@ class FluxServer:
                     "2. **Standardized advanced targeting** - Always use 'target' key:\n" +
                     "   * ✅ highlight={\"target\": \"MyClass.method\"} - single target\n" +
                     "   * ✅ highlight={\"target\": [\"Class1\", \"Class2.method\"]} - multiple targets\n" +
-                    "   * ✅ highlight={\"target\": \"MyClass\", \"occurrence\": 2} - 2nd occurrence\n" +
                     "   * ✅ highlight={\"target\": \"MyClass\", \"related_files\": [\"other.py\"]} - multi-file\n\n" +
                     "3. **replacement** - Can be string or dictionary for multiple targets:\n" +
                     "   * ✅ replace_with=\"\"\"def method(self) -> None:\\n    return True\"\"\"\n" +
