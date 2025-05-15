@@ -141,6 +141,8 @@ class PythonParser(BaseParser):
         # Apply the replacement
         new_content: str = content[:result.start_pos] + formatted_replacement + content[result.end_pos:]
         return new_content
+        
+
 
     def _validate_compatibility(self, original_block: str, new_text: str, metadata: dict) -> list[str]:
         """Validate semantic compatibility between original and replacement code."""

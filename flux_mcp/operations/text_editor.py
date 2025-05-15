@@ -619,19 +619,89 @@ class TextEditor:
                     await self.transaction_manager.rollback(transaction_id)
                     return result_data
 
-            # Check if replacement has inconsistent indentation
+            # Enhanced indentation validation
             if len(replace_with.splitlines()) > 1:
+                # Detect indentation inconsistencies
                 has_inconsistent_indentation: bool = False
                 indentation_chars: list[str] = []
-                for line in replace_with.splitlines()[1:]:  # Skip first line
+                indentation_sizes: list[int] = []
+                mixed_indentation_lines: list[int] = []
+                irregular_indentation_lines: list[int] = []
+                
+                # Extract first line indentation style for baseline
+                first_content_line_idx: int = 0
+                for idx, line in enumerate(replace_with.splitlines()):
+                    if line.strip():
+                        first_content_line_idx = idx
+                        break
+                        
+                first_content_line: str = replace_with.splitlines()[first_content_line_idx]
+                first_leading_whitespace: str = first_content_line[:len(first_content_line) - len(first_content_line.lstrip())]
+                base_indent_char: str = '\t' if '\t' in first_leading_whitespace else ' '
+                
+                # Validate all non-empty lines
+                for idx, line in enumerate(replace_with.splitlines()[1:], 1):  # Skip first line, 1-indexed
                     if line.strip():  # Only non-empty lines
                         leading_whitespace: str = line[:len(line) - len(line.lstrip())]
                         if leading_whitespace:
-                            indentation_chars.append('\t' if '\t' in leading_whitespace else ' ')
+                            current_indent_char: str = '\t' if '\t' in leading_whitespace else ' '
+                            indentation_chars.append(current_indent_char)
+                            indentation_sizes.append(len(leading_whitespace))
+                            
+                            # Check for mixed indentation within the line
+                            if ' ' in leading_whitespace and '\t' in leading_whitespace:
+                                has_inconsistent_indentation = True
+                                mixed_indentation_lines.append(idx)
+                            
+                            # Check for indentation character inconsistency with first line
+                            if current_indent_char != base_indent_char:
+                                has_inconsistent_indentation = True
+                                mixed_indentation_lines.append(idx)
+                                
+                # Check indentation increments for consistency (spaces only)
+                if indentation_sizes and base_indent_char == ' ':
+                    # Create a set of indentation level differences to determine if 
+                    # increments are consistent (should all be the same, typically 2, 4, or 8)
+                    indentation_diffs: set[int] = set()
+                    sorted_sizes: list[int] = sorted(set(indentation_sizes))
+                    
+                    for i in range(1, len(sorted_sizes)):
+                        diff: int = sorted_sizes[i] - sorted_sizes[i-1]
+                        if diff > 0:
+                            indentation_diffs.add(diff)
+                    
+                    # If we have more than one indentation increment size, flag it
+                    if len(indentation_diffs) > 1:
+                        has_inconsistent_indentation = True
+                        result_data["errors"].append(
+                            f"Inconsistent indentation increments detected: {indentation_diffs}"
+                        )
                 
+                # Error messaging for mixed indentation
                 if ' ' in indentation_chars and '\t' in indentation_chars:
                     has_inconsistent_indentation = True
-                    result_data["warnings"].append("Mixed indentation (tabs and spaces) detected")
+                    error_msg: str = (
+                        "CRITICAL INDENTATION ERROR: Mixed indentation (tabs and spaces) detected.\n"
+                        f"Lines with mixed indentation: {mixed_indentation_lines}\n"
+                        "Python is sensitive to consistent indentation. Please use either tabs OR spaces, not both."
+                    )
+                    result_data["errors"].append(error_msg)
+                    result_data["message"] = error_msg
+                    await self.transaction_manager.rollback(transaction_id)
+                    return result_data
+                    
+                # Error messaging for irregular indentation
+                if irregular_indentation_lines:
+                    has_inconsistent_indentation = True
+                    error_msg: str = (
+                        "CRITICAL INDENTATION ERROR: Irregular indentation pattern detected.\n"
+                        f"Lines with irregular indentation: {irregular_indentation_lines}\n"
+                        "Python requires consistent indentation patterns. Please check your code."
+                    )
+                    result_data["errors"].append(error_msg)
+                    result_data["message"] = error_msg
+                    await self.transaction_manager.rollback(transaction_id)
+                    return result_data
             
             # Apply the replacement while preserving formatting
             new_content: str = parser.apply_replacement(content, result, replace_with)
