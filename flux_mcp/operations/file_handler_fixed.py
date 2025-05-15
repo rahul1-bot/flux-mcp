@@ -22,12 +22,12 @@ class FileHandler:
 
     async def read_file(self, file_path: Path, encoding: str | None = None,
                        start_line: int | None = None, end_line: int | None = None) -> str:
-        # Skip cache for now - it's causing stale reads
-        # cache_key: str = f"{file_path}:{start_line}:{end_line}"
-        # cached_content: bytes | None = await self.memory_manager.cache_get(cache_key)
+        # Check cache first
+        cache_key: str = f"{file_path}:{start_line}:{end_line}"
+        cached_content: bytes | None = await self.memory_manager.cache_get(cache_key)
         
-        # if cached_content:
-        #     return cached_content.decode(encoding or 'utf-8')
+        if cached_content:
+            return cached_content.decode(encoding or 'utf-8')
         
         # Read file
         if not file_path.exists():
@@ -46,8 +46,8 @@ class FileHandler:
             detected: dict[str, Any] = chardet.detect(content[:1024])
             encoding = detected['encoding'] or 'utf-8'
         
-        # Skip caching for now
-        # await self.memory_manager.cache_put(cache_key, content)
+        # Cache the content
+        await self.memory_manager.cache_put(cache_key, content)
         
         return content.decode(encoding)
 

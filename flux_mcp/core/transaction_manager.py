@@ -16,6 +16,7 @@ class Transaction:
     id: str
     timestamp: datetime
     file_locks: dict[Path, int] = field(default_factory=dict)
+    file_handles: dict[Path, Any] = field(default_factory=dict)
     original_states: dict[Path, bytes] = field(default_factory=dict)
     temp_files: dict[Path, Path] = field(default_factory=dict)
     is_committed: bool = False
@@ -48,15 +49,21 @@ class TransactionManager:
             
             # Open file and acquire exclusive lock
             loop: asyncio.AbstractEventLoop = asyncio.get_event_loop()
-            fd: int = await loop.run_in_executor(
+            fd: int
+            file_handle: Any
+            fd, file_handle = await loop.run_in_executor(
                 None, self._acquire_lock_sync, file_path
             )
             
             transaction.file_locks[file_path] = fd
+            transaction.file_handles[file_path] = file_handle
             
-            # Read current state for rollback capability
-            with open(file_path, 'rb') as f:
-                transaction.original_states[file_path] = f.read()
+            # Read current state for rollback capability if file exists
+            if file_path.exists():
+                with open(file_path, 'rb') as f:
+                    transaction.original_states[file_path] = f.read()
+            else:
+                transaction.original_states[file_path] = b''
             
             # Create temp file for atomic operations
             temp_fd: int
@@ -68,10 +75,19 @@ class TransactionManager:
             )
             transaction.temp_files[file_path] = Path(temp_path)
 
-    def _acquire_lock_sync(self, file_path: Path) -> int:
-        fd: int = open(file_path, 'rb+').fileno()
+    def _acquire_lock_sync(self, file_path: Path) -> tuple[int, Any]:
+        # Create parent directories if they don't exist
+        file_path.parent.mkdir(parents=True, exist_ok=True)
+        
+        # Create file if it doesn't exist
+        if not file_path.exists():
+            file_path.touch()
+        
+        # Open file for reading and writing
+        file_handle = open(file_path, 'r+b')
+        fd: int = file_handle.fileno()
         fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        return fd
+        return fd, file_handle
 
     async def write_to_temp(self, transaction_id: str, file_path: Path, content: bytes) -> None:
         async with self.lock:
@@ -92,7 +108,8 @@ class TransactionManager:
         with open(temp_path, 'wb') as f:
             f.write(content)
             f.flush()
-            fcntl.fcntl(f.fileno(), fcntl.F_FULLFSYNC)
+            import os
+            os.fsync(f.fileno())
 
     async def commit(self, transaction_id: str) -> None:
         async with self.lock:
@@ -124,8 +141,12 @@ class TransactionManager:
             try:
                 # Restore original states
                 for file_path, original_state in transaction.original_states.items():
-                    with open(file_path, 'wb') as f:
-                        f.write(original_state)
+                    if original_state:  # Only restore if there was original content
+                        with open(file_path, 'wb') as f:
+                            f.write(original_state)
+                    elif file_path.exists():
+                        # If file was new and transaction is rolling back, remove it
+                        file_path.unlink()
                 
                 # Clean up temp files
                 for temp_path in transaction.temp_files.values():
@@ -140,6 +161,12 @@ class TransactionManager:
         for file_path, fd in transaction.file_locks.items():
             try:
                 fcntl.flock(fd, fcntl.LOCK_UN)
-                fcntl.fcntl(fd, fcntl.F_NOCACHE, 1)
+            except Exception:
+                pass
+        
+        # Close file handles
+        for file_handle in transaction.file_handles.values():
+            try:
+                file_handle.close()
             except Exception:
                 pass

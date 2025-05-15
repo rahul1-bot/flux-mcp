@@ -8,7 +8,7 @@ from mcp.server import Server, NotificationOptions
 from mcp.server.models import InitializationOptions
 import mcp.types as types
 
-from flux_mcp.core.flux_engine import FluxEngine
+from flux_mcp.core.flux_engine_optimized import FluxEngine
 from flux_mcp.core.transaction_manager import TransactionManager
 from flux_mcp.core.memory_manager import MemoryManager
 

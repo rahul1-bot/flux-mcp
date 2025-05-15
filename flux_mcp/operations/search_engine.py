@@ -20,6 +20,22 @@ class SearchResult:
     byte_offset: int
 
 
+class MatchObject:
+    def __init__(self, start_pos: int, end_pos: int, text: str) -> None:
+        self._start: int = start_pos
+        self._end: int = end_pos
+        self._text: str = text
+    
+    def start(self) -> int:
+        return self._start
+    
+    def end(self) -> int:
+        return self._end
+    
+    def group(self) -> str:
+        return self._text
+
+
 class SearchEngine:
     def __init__(self, memory_manager: MemoryManager, gpu_enabled: bool = True) -> None:
         self.memory_manager: MemoryManager = memory_manager
@@ -104,8 +120,10 @@ class SearchEngine:
         byte_offset: int = 0
         
         for line_num, line in enumerate(lines):
+            matches: list[Any] = []
+            
             if is_regex:
-                matches: list[re.Match] = list(regex.finditer(line))
+                matches = list(regex.finditer(line))
             else:
                 if not case_sensitive:
                     search_line: str = line.lower()
@@ -114,31 +132,36 @@ class SearchEngine:
                     search_line = line
                     search_pattern = pattern
                 
-                matches = []
                 start: int = 0
                 while True:
                     pos: int = search_line.find(search_pattern, start)
                     if pos == -1:
                         break
-                    matches.append(type('Match', (), {
-                        'start': lambda: pos,
-                        'end': lambda: pos + len(search_pattern),
-                        'group': lambda: line[pos:pos + len(search_pattern)]
-                    })())
+                    
+                    # Create a proper match object
+                    match = MatchObject(
+                        start_pos=pos,
+                        end_pos=pos + len(search_pattern),
+                        text=line[pos:pos + len(search_pattern)]
+                    )
+                    matches.append(match)
                     start = pos + 1
             
             for match in matches:
                 # Get context
-                context_before: str = line[:match.start()][-50:]
-                context_after: str = line[match.end():][:50]
+                match_start: int = match.start()
+                match_end: int = match.end()
+                
+                context_before: str = line[:match_start][-50:]
+                context_after: str = line[match_end:][:50]
                 
                 result: SearchResult = SearchResult(
                     line_number=line_num,
-                    column=match.start(),
-                    match_text=match.group() if hasattr(match, 'group') else line[match.start():match.end()],
+                    column=match_start,
+                    match_text=match.group(),
                     context_before=context_before,
                     context_after=context_after,
-                    byte_offset=byte_offset + match.start()
+                    byte_offset=byte_offset + match_start
                 )
                 results.append(result)
             
